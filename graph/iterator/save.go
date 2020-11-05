@@ -4,135 +4,76 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cayleygraph/cayley/graph"
+	"github.com/cayleygraph/cayley/graph/refs"
 )
 
 var (
-	_ graph.IteratorFuture = (*Save)(nil)
-	_ graph.Tagger         = (*Save)(nil)
+	_ TaggerBase = (*Save)(nil)
 )
 
-func Tag(it graph.Iterator, tag string) graph.Iterator {
-	if s, ok := it.(graph.Tagger); ok {
+func Tag(it Shape, tag string) Shape {
+	if s, ok := it.(TaggerShape); ok {
 		s.AddTags(tag)
 		return s
-	} else if s, ok := graph.AsShape(it).(graph.TaggerShape); ok {
+	} else if s, ok := it.(TaggerShape); ok {
 		s.AddTags(tag)
-		return graph.AsLegacy(s)
+		return s
 	}
 	return NewSave(it, tag)
 }
 
-func TagShape(it graph.IteratorShape, tag string) graph.IteratorShape {
-	if s, ok := it.(graph.TaggerShape); ok {
-		s.AddTags(tag)
-		return s
-	} else if s, ok := graph.AsLegacy(it).(graph.Tagger); ok {
-		s.AddTags(tag)
-		return graph.AsShape(s)
-	}
-	return newSave(it, tag)
-}
-
-func NewSave(on graph.Iterator, tags ...string) *Save {
-	it := &Save{
-		it: newSave(graph.AsShape(on), tags...),
-	}
-	it.Iterator = graph.NewLegacy(it.it, it)
-	return it
-}
-
-type Save struct {
-	it *save
-	graph.Iterator
-}
-
-func (it *Save) AsShape() graph.IteratorShape {
-	it.Close()
-	return it.it
-}
-
-// Add a tag to the iterator.
-func (it *Save) AddTags(tag ...string) {
-	it.it.AddTags(tag...)
-}
-
-func (it *Save) AddFixedTag(tag string, value graph.Ref) {
-	it.it.AddFixedTag(tag, value)
-}
-
-// Tags returns the tags held in the tagger. The returned value must not be mutated.
-func (it *Save) Tags() []string {
-	return it.it.Tags()
-}
-
-// Fixed returns the fixed tags held in the tagger. The returned value must not be mutated.
-func (it *Save) FixedTags() map[string]graph.Ref {
-	return it.it.FixedTags()
-}
-
-func (it *Save) CopyFromTagger(st graph.TaggerBase) {
-	it.it.CopyFromTagger(st)
-}
-
 var (
-	_ graph.IteratorShapeCompat = (*save)(nil)
-	_ graph.TaggerShape         = (*save)(nil)
+	_ Shape       = (*Save)(nil)
+	_ TaggerShape = (*Save)(nil)
 )
 
-func newSave(on graph.IteratorShape, tags ...string) *save {
-	s := &save{it: on}
+func NewSave(on Shape, tags ...string) *Save {
+	s := &Save{it: on}
 	s.AddTags(tags...)
 	return s
 }
 
-type save struct {
-	it        graph.IteratorShape
+type Save struct {
+	it        Shape
 	tags      []string
-	fixedTags map[string]graph.Ref
+	fixedTags map[string]refs.Ref
 }
 
-func (it *save) Iterate() graph.Scanner {
+func (it *Save) Iterate() Scanner {
 	return newSaveNext(it.it.Iterate(), it.tags, it.fixedTags)
 }
 
-func (it *save) Lookup() graph.Index {
+func (it *Save) Lookup() Index {
 	return newSaveContains(it.it.Lookup(), it.tags, it.fixedTags)
 }
 
-func (it *save) AsLegacy() graph.Iterator {
-	it2 := &Save{it: it}
-	it2.Iterator = graph.NewLegacy(it, it2)
-	return it2
-}
-
-func (it *save) String() string {
+func (it *Save) String() string {
 	return fmt.Sprintf("Save(%v, %v)", it.tags, it.fixedTags)
 }
 
 // Add a tag to the iterator.
-func (it *save) AddTags(tag ...string) {
+func (it *Save) AddTags(tag ...string) {
 	it.tags = append(it.tags, tag...)
 }
 
-func (it *save) AddFixedTag(tag string, value graph.Ref) {
+func (it *Save) AddFixedTag(tag string, value refs.Ref) {
 	if it.fixedTags == nil {
-		it.fixedTags = make(map[string]graph.Ref)
+		it.fixedTags = make(map[string]refs.Ref)
 	}
 	it.fixedTags[tag] = value
 }
 
 // Tags returns the tags held in the tagger. The returned value must not be mutated.
-func (it *save) Tags() []string {
+func (it *Save) Tags() []string {
 	return it.tags
 }
 
 // Fixed returns the fixed tags held in the tagger. The returned value must not be mutated.
-func (it *save) FixedTags() map[string]graph.Ref {
+func (it *Save) FixedTags() map[string]refs.Ref {
 	return it.fixedTags
 }
 
-func (it *save) CopyFromTagger(st graph.TaggerBase) {
+func (it *Save) CopyFromTagger(st TaggerBase) {
 	it.tags = append(it.tags, st.Tags()...)
 
 	fixed := st.FixedTags()
@@ -140,56 +81,53 @@ func (it *save) CopyFromTagger(st graph.TaggerBase) {
 		return
 	}
 	if it.fixedTags == nil {
-		it.fixedTags = make(map[string]graph.Ref, len(fixed))
+		it.fixedTags = make(map[string]refs.Ref, len(fixed))
 	}
 	for k, v := range fixed {
 		it.fixedTags[k] = v
 	}
 }
 
-func (it *save) Stats(ctx context.Context) (graph.IteratorCosts, error) {
+func (it *Save) Stats(ctx context.Context) (Costs, error) {
 	return it.it.Stats(ctx)
 }
 
-func (it *save) Optimize(ctx context.Context) (nit graph.IteratorShape, no bool) {
+func (it *Save) Optimize(ctx context.Context) (nit Shape, no bool) {
 	sub, ok := it.it.Optimize(ctx)
 	if len(it.tags) == 0 && len(it.fixedTags) == 0 {
 		return sub, true
 	}
-	if st, ok2 := sub.(graph.TaggerShape); ok2 {
+	if st, ok2 := sub.(TaggerShape); ok2 {
 		st.CopyFromTagger(it)
 		return st, true
-	} else if st, ok2 := graph.AsLegacy(sub).(graph.Tagger); ok2 {
-		st.CopyFromTagger(it)
-		return graph.AsShape(st), true
 	}
 	if !ok {
 		return it, false
 	}
-	s := newSave(sub)
+	s := NewSave(sub)
 	s.CopyFromTagger(it)
 	return s, true
 }
 
-func (it *save) SubIterators() []graph.IteratorShape {
-	return []graph.IteratorShape{it.it}
+func (it *Save) SubIterators() []Shape {
+	return []Shape{it.it}
 }
 
-func newSaveNext(it graph.Scanner, tags []string, fixed map[string]graph.Ref) *saveNext {
+func newSaveNext(it Scanner, tags []string, fixed map[string]refs.Ref) *saveNext {
 	return &saveNext{it: it, tags: tags, fixedTags: fixed}
 }
 
 type saveNext struct {
-	it        graph.Scanner
+	it        Scanner
 	tags      []string
-	fixedTags map[string]graph.Ref
+	fixedTags map[string]refs.Ref
 }
 
 func (it *saveNext) String() string {
 	return fmt.Sprintf("Save(%v, %v)", it.tags, it.fixedTags)
 }
 
-func (it *saveNext) TagResults(dst map[string]graph.Ref) {
+func (it *saveNext) TagResults(dst map[string]refs.Ref) {
 	it.it.TagResults(dst)
 
 	v := it.Result()
@@ -202,7 +140,7 @@ func (it *saveNext) TagResults(dst map[string]graph.Ref) {
 	}
 }
 
-func (it *saveNext) Result() graph.Ref {
+func (it *saveNext) Result() refs.Ref {
 	return it.it.Result()
 }
 
@@ -222,21 +160,21 @@ func (it *saveNext) Close() error {
 	return it.it.Close()
 }
 
-func newSaveContains(it graph.Index, tags []string, fixed map[string]graph.Ref) *saveContains {
+func newSaveContains(it Index, tags []string, fixed map[string]refs.Ref) *saveContains {
 	return &saveContains{it: it, tags: tags, fixed: fixed}
 }
 
 type saveContains struct {
-	it    graph.Index
+	it    Index
 	tags  []string
-	fixed map[string]graph.Ref
+	fixed map[string]refs.Ref
 }
 
 func (it *saveContains) String() string {
 	return fmt.Sprintf("SaveContains(%v, %v)", it.tags, it.fixed)
 }
 
-func (it *saveContains) TagResults(dst map[string]graph.Ref) {
+func (it *saveContains) TagResults(dst map[string]refs.Ref) {
 	it.it.TagResults(dst)
 
 	v := it.Result()
@@ -249,7 +187,7 @@ func (it *saveContains) TagResults(dst map[string]graph.Ref) {
 	}
 }
 
-func (it *saveContains) Result() graph.Ref {
+func (it *saveContains) Result() refs.Ref {
 	return it.it.Result()
 }
 
@@ -257,7 +195,7 @@ func (it *saveContains) NextPath(ctx context.Context) bool {
 	return it.it.NextPath(ctx)
 }
 
-func (it *saveContains) Contains(ctx context.Context, v graph.Ref) bool {
+func (it *saveContains) Contains(ctx context.Context, v refs.Ref) bool {
 	return it.it.Contains(ctx, v)
 }
 

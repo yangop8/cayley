@@ -4,11 +4,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/iterator"
 	"github.com/cayleygraph/cayley/graph/memstore"
-	"github.com/cayleygraph/cayley/quad"
 	"github.com/cayleygraph/cayley/schema"
+	"github.com/cayleygraph/quad"
 )
 
 func TestLoadLoop(t *testing.T) {
@@ -83,7 +82,7 @@ func TestLoadIteratorTo(t *testing.T) {
 			} else {
 				out = reflect.New(rt)
 			}
-			var it graph.Iterator
+			var it iterator.Shape
 			if c.from != nil {
 				fixed := iterator.NewFixed()
 				for _, id := range c.from {

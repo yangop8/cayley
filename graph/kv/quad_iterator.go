@@ -18,102 +18,77 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cayleygraph/cayley/graph"
-	"github.com/cayleygraph/cayley/graph/proto"
 	"github.com/hidal-go/hidalgo/kv"
+
+	"github.com/cayleygraph/cayley/graph"
+	"github.com/cayleygraph/cayley/graph/iterator"
+	"github.com/cayleygraph/cayley/graph/proto"
+	"github.com/cayleygraph/cayley/graph/refs"
 )
 
-var _ graph.IteratorFuture = &QuadIterator{}
-
 type QuadIterator struct {
-	it *quadIterator
-	graph.Iterator
-}
-
-func NewQuadIterator(qs *QuadStore, ind QuadIndex, vals []uint64) *QuadIterator {
-	it := &QuadIterator{
-		it: newQuadIterator(qs, ind, vals),
-	}
-	it.Iterator = graph.NewLegacy(it.it, it)
-	return it
-}
-
-func (it *QuadIterator) AsShape() graph.IteratorShape {
-	it.Close()
-	return it.it
-}
-
-func (it *QuadIterator) Sorted() bool { return true }
-
-var _ graph.IteratorShapeCompat = &quadIterator{}
-
-type quadIterator struct {
 	qs   *QuadStore
 	ind  QuadIndex
 	vals []uint64
 
-	size graph.Size
+	size refs.Size
 	err  error
 }
 
-func newQuadIterator(qs *QuadStore, ind QuadIndex, vals []uint64) *quadIterator {
-	return &quadIterator{
+func (qs *QuadStore) newQuadIterator(ind QuadIndex, vals []uint64) *QuadIterator {
+	return &QuadIterator{
 		qs:   qs,
 		ind:  ind,
 		vals: vals,
-		size: graph.Size{Size: -1},
+		size: refs.Size{Value: -1},
 	}
 }
 
-func (it *quadIterator) Iterate() graph.Scanner {
-	return newQuadIteratorNext(it.qs, it.ind, it.vals)
+func (it *QuadIterator) Iterate() iterator.Scanner {
+	return it.qs.newQuadIteratorNext(it.ind, it.vals)
 }
 
-func (it *quadIterator) Lookup() graph.Index {
-	return newQuadIteratorContains(it.qs, it.ind, it.vals)
+func (it *QuadIterator) Lookup() iterator.Index {
+	return it.qs.newQuadIteratorContains(it.ind, it.vals)
 }
 
-func (it *quadIterator) AsLegacy() graph.Iterator {
-	it2 := &QuadIterator{it: it}
-	it2.Iterator = graph.NewLegacy(it, it2)
-	return it2
-}
-
-func (it *quadIterator) SubIterators() []graph.IteratorShape {
+func (it *QuadIterator) SubIterators() []iterator.Shape {
 	return nil
 }
 
-func (it *quadIterator) getSize(ctx context.Context) (graph.Size, error) {
+func (it *QuadIterator) getSize(ctx context.Context) (refs.Size, error) {
 	if it.err != nil {
-		return graph.Size{}, it.err
-	} else if it.size.Size >= 0 {
+		return refs.Size{}, it.err
+	} else if it.size.Value >= 0 {
 		return it.size, nil
 	}
 	if len(it.ind.Dirs) == len(it.vals) {
 		sz, err := it.qs.indexSize(ctx, it.ind, it.vals)
 		if err != nil {
 			it.err = err
-			return graph.Size{}, it.err
+			return refs.Size{}, it.err
 		}
 		it.size = sz
 		return sz, nil
 	}
-	return graph.Size{Size: 1 + it.qs.Size()/2, Exact: false}, nil
+	sz := refs.Size{Value: 1 + it.qs.Size()/2, Exact: false}
+	it.size = sz
+	return sz, nil
 }
 
-func (it *quadIterator) String() string {
+func (it *QuadIterator) String() string {
 	return fmt.Sprintf("KVQuads(%v)", it.ind)
 }
 
-func (it *quadIterator) Sorted() bool { return true }
+func (it *QuadIterator) Sorted() bool { return true }
 
-func (it *quadIterator) Optimize(ctx context.Context) (graph.IteratorShape, bool) {
+func (it *QuadIterator) Optimize(ctx context.Context) (iterator.Shape, bool) {
 	return it, false
 }
 
-func (it *quadIterator) Stats(ctx context.Context) (graph.IteratorCosts, error) {
+func (it *QuadIterator) Stats(ctx context.Context) (iterator.Costs, error) {
 	s, err := it.getSize(ctx)
-	return graph.IteratorCosts{
+	return iterator.Costs{
 		ContainsCost: 1,
 		NextCost:     2,
 		Size:         s,
@@ -136,7 +111,7 @@ type quadIteratorNext struct {
 	prim *proto.Primitive
 }
 
-func newQuadIteratorNext(qs *QuadStore, ind QuadIndex, vals []uint64) *quadIteratorNext {
+func (qs *QuadStore) newQuadIteratorNext(ind QuadIndex, vals []uint64) *quadIteratorNext {
 	return &quadIteratorNext{
 		qs:   qs,
 		ind:  ind,
@@ -179,6 +154,7 @@ func (it *quadIteratorNext) ensureTx() bool {
 	if it.err != nil {
 		return false
 	}
+	it.tx = wrapTx(it.tx)
 	return true
 }
 
@@ -255,7 +231,7 @@ type quadIteratorContains struct {
 	prim *proto.Primitive
 }
 
-func newQuadIteratorContains(qs *QuadStore, ind QuadIndex, vals []uint64) *quadIteratorContains {
+func (qs *QuadStore) newQuadIteratorContains(ind QuadIndex, vals []uint64) *quadIteratorContains {
 	return &quadIteratorContains{
 		qs:   qs,
 		ind:  ind,

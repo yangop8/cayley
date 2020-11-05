@@ -20,13 +20,15 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/hidal-go/hidalgo/legacy/nosql"
+
 	"github.com/cayleygraph/cayley/clog"
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/iterator"
+	"github.com/cayleygraph/cayley/graph/refs"
 	"github.com/cayleygraph/cayley/internal/lru"
-	"github.com/cayleygraph/cayley/quad"
-	"github.com/cayleygraph/cayley/quad/pquads"
-	"github.com/hidal-go/hidalgo/legacy/nosql"
+	"github.com/cayleygraph/quad"
+	"github.com/cayleygraph/quad/pquads"
 )
 
 const DefaultDBName = "cayley"
@@ -125,7 +127,7 @@ type QuadHash [4]string
 func (QuadHash) IsNode() bool       { return false }
 func (v QuadHash) Key() interface{} { return v }
 
-func (h QuadHash) Get(d quad.Direction) string {
+func (v QuadHash) Get(d quad.Direction) string {
 	var ind int
 	switch d {
 	case quad.Subject:
@@ -137,7 +139,7 @@ func (h QuadHash) Get(d quad.Direction) string {
 	case quad.Label:
 		ind = 3
 	}
-	return h[ind]
+	return v[ind]
 }
 
 const (
@@ -618,35 +620,35 @@ func (qs *QuadStore) Quad(val graph.Ref) quad.Quad {
 	}
 }
 
-func (qs *QuadStore) QuadIterator(d quad.Direction, val graph.Ref) graph.Iterator {
+func (qs *QuadStore) QuadIterator(d quad.Direction, val graph.Ref) iterator.Shape {
 	h, ok := val.(NodeHash)
 	if !ok {
 		return iterator.NewNull()
 	}
-	return NewLinksToIterator(qs, "quads", []Linkage{{Dir: d, Val: h}})
+	return qs.newLinksToIterator("quads", []Linkage{{Dir: d, Val: h}})
 }
 
-func (qs *QuadStore) QuadIteratorSize(ctx context.Context, d quad.Direction, v graph.Ref) (graph.Size, error) {
+func (qs *QuadStore) QuadIteratorSize(ctx context.Context, d quad.Direction, v graph.Ref) (refs.Size, error) {
 	h, ok := v.(NodeHash)
 	if !ok {
-		return graph.Size{Size: 0, Exact: true}, nil
+		return refs.Size{Value: 0, Exact: true}, nil
 	}
 	sz, err := qs.getSize("quads", linkageToFilters([]Linkage{{Dir: d, Val: h}}))
 	if err != nil {
-		return graph.Size{}, err
+		return refs.Size{}, err
 	}
-	return graph.Size{
-		Size:  sz,
+	return refs.Size{
+		Value: sz,
 		Exact: true,
 	}, nil
 }
 
-func (qs *QuadStore) NodesAllIterator() graph.Iterator {
-	return NewIterator(qs, "nodes")
+func (qs *QuadStore) NodesAllIterator() iterator.Shape {
+	return qs.newIterator("nodes")
 }
 
-func (qs *QuadStore) QuadsAllIterator() graph.Iterator {
-	return NewIterator(qs, "quads")
+func (qs *QuadStore) QuadsAllIterator() iterator.Shape {
+	return qs.newIterator("quads")
 }
 
 func (qs *QuadStore) hashOf(s quad.Value) NodeHash {
@@ -663,7 +665,7 @@ func (qs *QuadStore) ValueOf(s quad.Value) graph.Ref {
 func (qs *QuadStore) NameOf(v graph.Ref) quad.Value {
 	if v == nil {
 		return nil
-	} else if v, ok := v.(graph.PreFetchedValue); ok {
+	} else if v, ok := v.(refs.PreFetchedValue); ok {
 		return v.NameOf()
 	}
 	hash := v.(NodeHash)
@@ -701,12 +703,12 @@ func (qs *QuadStore) Stats(ctx context.Context, exact bool) (graph.Stats, error)
 		return graph.Stats{}, err
 	}
 	return graph.Stats{
-		Nodes: graph.Size{
-			Size:  nodes,
+		Nodes: refs.Size{
+			Value: nodes,
 			Exact: true,
 		},
-		Quads: graph.Size{
-			Size:  quads,
+		Quads: refs.Size{
+			Value: quads,
 			Exact: true,
 		},
 	}, nil

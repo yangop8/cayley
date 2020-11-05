@@ -4,10 +4,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/cayleygraph/cayley/graph"
+	"github.com/stretchr/testify/require"
+
 	"github.com/cayleygraph/cayley/graph/graphmock"
 	"github.com/cayleygraph/cayley/graph/iterator"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/cayley/graph/refs"
+	"github.com/cayleygraph/quad"
 )
 
 func TestResolverIteratorIterate(t *testing.T) {
@@ -27,28 +29,18 @@ func TestResolverIteratorIterate(t *testing.T) {
 	qs := &graphmock.Store{
 		Data: data,
 	}
-	expected := make(map[quad.Value]graph.Ref)
+	expected := make(map[quad.Value]refs.Ref)
 	for _, node := range nodes {
 		expected[node] = qs.ValueOf(node)
 	}
-	it := iterator.NewResolver(qs, nodes...)
+	it := iterator.NewResolver(qs, nodes...).Iterate()
 	for _, node := range nodes {
-		if it.Next(ctx) != true {
-			t.Fatal("unexpected end of iterator")
-		}
-		if err := it.Err(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if value := it.Result(); value != expected[node] {
-			t.Fatalf("unexpected quad value: expected %v, got %v", expected[node], value)
-		}
+		require.True(t, it.Next(ctx))
+		require.NoError(t, it.Err())
+		require.Equal(t, expected[node], it.Result())
 	}
-	if it.Next(ctx) != false {
-		t.Fatal("expected end of iterator")
-	}
-	if it.Result() != nil {
-		t.Fatal("expected nil result")
-	}
+	require.False(t, it.Next(ctx))
+	require.Nil(t, it.Result())
 }
 
 func TestResolverIteratorNotFoundError(t *testing.T) {
@@ -73,19 +65,13 @@ func TestResolverIteratorNotFoundError(t *testing.T) {
 		Data: data,
 	}
 	count := 0
-	it := iterator.NewResolver(qs, nodes...)
+	it := iterator.NewResolver(qs, nodes...).Iterate()
 	for it.Next(ctx) {
 		count++
 	}
-	if count != 0 {
-		t.Fatal("expected end of iterator")
-	}
-	if it.Err() == nil {
-		t.Fatal("expected not found error")
-	}
-	if it.Result() != nil {
-		t.Fatal("expected nil result")
-	}
+	require.Equal(t, 0, count)
+	require.Error(t, it.Err())
+	require.Nil(t, it.Result())
 }
 
 func TestResolverIteratorContains(t *testing.T) {
@@ -125,10 +111,8 @@ func TestResolverIteratorContains(t *testing.T) {
 			qs := &graphmock.Store{
 				Data: data,
 			}
-			it := iterator.NewResolver(qs, test.nodes...)
-			if it.Contains(ctx, graph.PreFetched(test.subject)) != test.contains {
-				t.Fatal("unexpected result")
-			}
+			it := iterator.NewResolver(qs, test.nodes...).Lookup()
+			require.Equal(t, test.contains, it.Contains(ctx, refs.PreFetched(test.subject)))
 		})
 	}
 }

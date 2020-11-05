@@ -14,9 +14,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/cayleygraph/cayley/clog"
-	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/internal/repl"
-	"github.com/cayleygraph/cayley/quad"
 	"github.com/cayleygraph/cayley/query"
 )
 
@@ -85,13 +83,13 @@ func NewQueryCmd() *cobra.Command {
 			if len(args) == 0 {
 				bytes, err := ioutil.ReadAll(os.Stdin)
 				if err != nil {
-					return fmt.Errorf("Error occured while reading from stdin : %s.", err)
+					return fmt.Errorf("error occured while reading from stdin : %s", err)
 				}
 				querystr = string(bytes)
 			} else if len(args) == 1 {
 				querystr = args[0]
 			} else {
-				return fmt.Errorf("Query accepts only one argument, the query string or nothing for reading from stdin.")
+				return fmt.Errorf("query accepts only one argument, the query string or nothing for reading from stdin")
 			}
 			clog.Infof("Query:\n%s", querystr)
 			printBackendInfo()
@@ -117,38 +115,21 @@ func NewQueryCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-
-			l := query.GetLanguage(lang)
-			if l == nil {
-				return fmt.Errorf("unknown query language: %q", lang)
-			}
 			enc := json.NewEncoder(os.Stdout)
-			sess := l.Session(h)
-			ch := make(chan query.Result, 100)
-			go sess.Execute(ctx, querystr, ch, limit)
-			for i := 0; limit <= 0 || i < limit; i++ {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case r, ok := <-ch:
-					if !ok {
-						return nil
-					} else if err = r.Err(); err != nil {
-						return err
-					}
-					obj := r.Result()
-					switch p := obj.(type) {
-					case map[string]graph.Ref:
-						m := make(map[string]quad.Value, len(p))
-						for k, v := range p {
-							m[k] = h.NameOf(v)
-						}
-						obj = m
-					}
-					enc.Encode(obj)
+			it, err := query.Execute(ctx, h, lang, querystr, query.Options{
+				Collation: query.JSON,
+				Limit:     limit,
+			})
+			if err != nil {
+				return err
+			}
+			defer it.Close()
+			for i := 0; it.Next(ctx) && (limit <= 0 || i < limit); i++ {
+				if err = enc.Encode(it.Result()); err != nil {
+					return err
 				}
 			}
-			return nil
+			return it.Err()
 		},
 	}
 	registerQueryFlags(cmd)

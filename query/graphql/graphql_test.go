@@ -12,8 +12,8 @@ import (
 
 	"github.com/cayleygraph/cayley/graph/graphtest/testutil"
 	"github.com/cayleygraph/cayley/graph/memstore"
-	"github.com/cayleygraph/cayley/quad"
-	"github.com/cayleygraph/cayley/voc/rdf"
+	"github.com/cayleygraph/quad"
+	"github.com/cayleygraph/quad/voc/rdf"
 )
 
 func iris(arr ...string) (out []quad.Value) {
@@ -123,8 +123,8 @@ var casesExecute = []struct {
 					"follows": nil,
 					"followed": []M{
 						{ValueKey: quad.IRI("alice")},
-						{ValueKey: quad.IRI("charlie")},
 						{ValueKey: quad.IRI("dani")},
+						{ValueKey: quad.IRI("charlie")},
 					},
 				},
 				{
@@ -283,8 +283,8 @@ var casesExecute = []struct {
 				{"id": quad.IRI("fred")},
 				{"id": quad.IRI("status")},
 				{"id": quad.String("cool_person")},
-				{"id": quad.IRI("charlie")},
 				{"id": quad.IRI("dani"), "status": quad.String("cool_person")},
+				{"id": quad.IRI("charlie")},
 				{"id": quad.IRI("greg"), "status": []quad.Value{
 					quad.String("cool_person"),
 					quad.String("smart_person"),
@@ -299,7 +299,7 @@ var casesExecute = []struct {
 	},
 }
 
-func toJson(o interface{}) string {
+func toJSON(o interface{}) string {
 	buf := bytes.NewBuffer(nil)
 	json.NewEncoder(buf).Encode(o)
 	buf2 := bytes.NewBuffer(nil)
@@ -320,7 +320,7 @@ func TestExecute(t *testing.T) {
 			require.NoError(t, err)
 			out, err := q.Execute(context.Background(), qs)
 			require.NoError(t, err)
-			require.Equal(t, c.result, out, "results:\n%v\n\nvs\n\n%v", toJson(c.result), toJson(out))
+			require.Equal(t, c.result, out, "results:\n%v\n\nvs\n\n%v", toJSON(c.result), toJSON(out))
 		})
 	}
 }

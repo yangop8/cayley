@@ -2,10 +2,11 @@ package cayley
 
 import (
 	"github.com/cayleygraph/cayley/graph"
+	"github.com/cayleygraph/cayley/graph/iterator"
 	_ "github.com/cayleygraph/cayley/graph/memstore"
-	"github.com/cayleygraph/cayley/graph/path"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/cayley/query/path"
 	_ "github.com/cayleygraph/cayley/writer"
+	"github.com/cayleygraph/quad"
 )
 
 var (
@@ -15,7 +16,7 @@ var (
 	NewTransaction = graph.NewTransaction
 )
 
-type Iterator = graph.Iterator
+type Iterator = iterator.Shape
 type QuadStore = graph.QuadStore
 type QuadWriter = graph.QuadWriter
 

@@ -16,12 +16,12 @@ import (
 	"github.com/cayleygraph/cayley/clog"
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/iterator"
-	"github.com/cayleygraph/cayley/graph/path"
-	"github.com/cayleygraph/cayley/graph/shape"
-	"github.com/cayleygraph/cayley/quad"
-	"github.com/cayleygraph/cayley/voc/rdf"
-	"github.com/cayleygraph/cayley/voc/rdfs"
-	"github.com/cayleygraph/cayley/voc/schema"
+	"github.com/cayleygraph/cayley/query/path"
+	"github.com/cayleygraph/cayley/query/shape"
+	"github.com/cayleygraph/quad"
+	"github.com/cayleygraph/quad/voc/rdf"
+	"github.com/cayleygraph/quad/voc/rdfs"
+	"github.com/cayleygraph/quad/voc/schema"
 )
 
 const (
@@ -214,7 +214,7 @@ type graphStreamEvent struct {
 }
 
 func (s *GraphStreamHandler) serveRawQuads(ctx context.Context, gs *GraphStream, quads shape.Shape, limit int) {
-	it := shape.BuildIterator(s.QS, quads)
+	it := shape.BuildIterator(ctx, s.QS, quads).Iterate()
 	defer it.Close()
 
 	var sh, oh valHash
@@ -265,13 +265,12 @@ func (s *GraphStreamHandler) serveNodesWithProps(ctx context.Context, gs *GraphS
 
 	ignore := make(map[quad.Value]struct{})
 
-	nodes := iterator.NewNot(propsPath.BuildIterator(), s.QS.NodesAllIterator())
-	defer nodes.Close()
+	nodes := iterator.NewNot(propsPath.BuildIterator(ctx), s.QS.NodesAllIterator())
 
 	ictx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	itc := graph.Iterate(ictx, nodes).On(s.QS).Limit(limit)
+	itc := iterator.Iterate(ictx, nodes).On(s.QS).Limit(limit)
 
 	qi := 0
 	_ = itc.EachValuePair(s.QS, func(v graph.Ref, nv quad.Value) {
@@ -287,7 +286,7 @@ func (s *GraphStreamHandler) serveNodesWithProps(ctx context.Context, gs *GraphS
 		)
 		quad.HashTo(nv, h[:])
 
-		predIt := s.QS.QuadIterator(quad.Subject, nodes.Result())
+		predIt := s.QS.QuadIterator(quad.Subject, v).Iterate()
 		defer predIt.Close()
 		for predIt.Next(ictx) {
 			// this check helps us ignore nodes with no links

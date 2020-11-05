@@ -9,8 +9,8 @@ import (
 	"github.com/cayleygraph/cayley/graph/graphtest"
 	"github.com/cayleygraph/cayley/graph/graphtest/testutil"
 	"github.com/cayleygraph/cayley/graph/kv"
-	"github.com/cayleygraph/cayley/graph/shape"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/cayley/query/shape"
+	"github.com/cayleygraph/quad"
 	hkv "github.com/hidal-go/hidalgo/kv"
 	"github.com/stretchr/testify/require"
 )
@@ -93,23 +93,26 @@ func testOptimize(t *testing.T, gen DatabaseFunc, _ *Config) {
 	testutil.MakeWriter(t, qs, opts, graphtest.MakeQuadSet()...)
 
 	// With an linksto-fixed pair
-	lto := shape.BuildIterator(qs, shape.Quads{
+	lto := shape.BuildIterator(ctx, qs, shape.Quads{
 		{Dir: quad.Object, Values: shape.Lookup{quad.Raw("F")}},
 	})
 
-	oldIt := shape.BuildIterator(qs, shape.Quads{
+	oldIt := shape.BuildIterator(ctx, qs, shape.Quads{
 		{Dir: quad.Object, Values: shape.Lookup{quad.Raw("F")}},
-	})
-	newIt, ok := lto.Optimize()
+	}).Iterate()
+	defer oldIt.Close()
+	newIts, ok := lto.Optimize(ctx)
 	if ok {
 		t.Errorf("unexpected optimization step")
 	}
-	if _, ok := newIt.(*kv.QuadIterator); !ok {
-		t.Errorf("Optimized iterator type does not match original, got: %T", newIt)
+	if _, ok := newIts.(*kv.QuadIterator); !ok {
+		t.Errorf("Optimized iterator type does not match original, got: %T", newIts)
 	}
+	newIt := newIts.Iterate()
+	defer newIt.Close()
 
-	newQuads := graphtest.IteratedQuads(t, qs, newIt)
-	oldQuads := graphtest.IteratedQuads(t, qs, oldIt)
+	newQuads := graphtest.IteratedQuadsNext(t, qs, newIt)
+	oldQuads := graphtest.IteratedQuadsNext(t, qs, oldIt)
 	if !reflect.DeepEqual(newQuads, oldQuads) {
 		t.Errorf("Optimized iteration does not match original")
 	}

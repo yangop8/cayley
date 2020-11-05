@@ -6,20 +6,23 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/cayleygraph/cayley/quad"
-	"github.com/cayleygraph/cayley/quad/pquads"
+	"github.com/cayleygraph/quad"
+	"github.com/cayleygraph/quad/pquads"
 )
 
 func New(addr string) *Client {
 	return &Client{addr: addr, cli: http.DefaultClient}
 }
 
+// Client is a struct used for communicating with a Cayley server through HTTP
+// Deprecated: Client exists for backwards compatability. New code should use
+// the updated client github.com/cayleygraph/go-client
 type Client struct {
 	addr string
 	cli  *http.Client
 }
 
-func (c *Client) SetHttpClient(cli *http.Client) {
+func (c *Client) SetHTTPClient(cli *http.Client) {
 	c.cli = cli
 }
 func (c *Client) url(s string, q map[string]string) string {

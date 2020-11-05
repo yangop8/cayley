@@ -17,8 +17,6 @@ package mql
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"sort"
 
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/iterator"
@@ -33,118 +31,91 @@ func init() {
 		Session: func(qs graph.QuadStore) query.Session {
 			return NewSession(qs)
 		},
-		HTTP: func(qs graph.QuadStore) query.HTTP {
-			return NewSession(qs)
-		},
-		REPL: func(qs graph.QuadStore) query.REPLSession {
-			return NewSession(qs)
-		},
 	})
 }
 
 type Session struct {
-	qs    graph.QuadStore
-	query *Query
+	qs graph.QuadStore
 }
 
 func NewSession(qs graph.QuadStore) *Session {
 	return &Session{qs: qs}
 }
 
-func (s *Session) ShapeOf(query string) (interface{}, error) {
-	var mqlQuery interface{}
-	err := json.Unmarshal([]byte(query), &mqlQuery)
-	if err != nil {
-		return nil, err
-	}
-	s.query = NewQuery(s)
-	s.query.BuildIteratorTree(mqlQuery)
-	output := make(map[string]interface{})
-	iterator.OutputQueryShapeForIterator(s.query.it, s.qs, output)
-	nodes := make([]iterator.Node, 0)
-	for _, n := range output["nodes"].([]iterator.Node) {
-		n.Tags = nil
-		nodes = append(nodes, n)
-	}
-	output["nodes"] = nodes
-	return output, nil
+type mqlIterator struct {
+	q   *Query
+	col query.Collation
+	it  iterator.Scanner
+	res []interface{}
 }
 
-func (s *Session) Execute(ctx context.Context, input string, c chan query.Result, limit int) {
-	defer close(c)
+func (it *mqlIterator) Next(ctx context.Context) bool {
+	// TODO: stream results
+	if it.res != nil {
+		if len(it.res) == 0 {
+			return false
+		}
+		it.res = it.res[1:]
+		return len(it.res) != 0
+	}
+	for it.it.Next(ctx) {
+		m := make(map[string]graph.Ref)
+		it.it.TagResults(m)
+		it.q.treeifyResult(m)
+		for it.it.NextPath(ctx) {
+			m = make(map[string]graph.Ref, len(m))
+			it.it.TagResults(m)
+			it.q.treeifyResult(m)
+		}
+	}
+	if err := it.it.Err(); err != nil {
+		return false
+	}
+	it.q.buildResults()
+	it.res = it.q.results
+	return len(it.res) != 0
+}
+
+func (it *mqlIterator) Result() interface{} {
+	if len(it.res) == 0 {
+		return nil
+	}
+	return it.res[0]
+}
+
+func (it *mqlIterator) Err() error {
+	return it.it.Err()
+}
+
+func (it *mqlIterator) Close() error {
+	return it.it.Close()
+}
+
+func (s *Session) Execute(ctx context.Context, input string, opt query.Options) (query.Iterator, error) {
+	switch opt.Collation {
+	case query.REPL, query.JSON:
+	default:
+		return nil, &query.ErrUnsupportedCollation{Collation: opt.Collation}
+	}
 	var mqlQuery interface{}
 	if err := json.Unmarshal([]byte(input), &mqlQuery); err != nil {
-		select {
-		case c <- query.ErrorResult(err):
-		case <-ctx.Done():
-		}
-		return
+		return nil, err
 	}
-	s.query = NewQuery(s)
-	s.query.BuildIteratorTree(mqlQuery)
-	if s.query.isError() {
-		select {
-		case c <- query.ErrorResult(s.query.err):
-		case <-ctx.Done():
-		}
-		return
+	q := NewQuery(s)
+	q.BuildIteratorTree(ctx, mqlQuery)
+	if q.isError() {
+		return nil, q.err
 	}
 
-	it := s.query.it
-	err := graph.Iterate(ctx, it).Limit(limit).TagEach(func(tags map[string]graph.Ref) {
-		select {
-		case c <- query.TagMapResult(tags):
-		case <-ctx.Done():
-		}
-	})
-	if err != nil {
-		select {
-		case c <- query.ErrorResult(err):
-		case <-ctx.Done():
-		}
+	it := q.it.Iterate()
+	if opt.Limit > 0 {
+		it = iterator.NewLimitNext(it, int64(opt.Limit))
 	}
-}
-
-func (s *Session) FormatREPL(result query.Result) string {
-	tags, ok := result.Result().(map[string]graph.Ref)
-	if !ok {
-		return ""
-	}
-	out := fmt.Sprintln("****")
-	tagKeys := make([]string, len(tags))
-	s.query.treeifyResult(tags)
-	s.query.buildResults()
-	r, _ := json.MarshalIndent(s.query.results, "", " ")
-	fmt.Println(string(r))
-	i := 0
-	for k := range tags {
-		tagKeys[i] = string(k)
-		i++
-	}
-	sort.Strings(tagKeys)
-	for _, k := range tagKeys {
-		if k == "$_" {
-			continue
-		}
-		out += fmt.Sprintf("%s : %s\n", k, s.qs.NameOf(tags[k]))
-	}
-	return out
-}
-
-func (s *Session) Collate(result query.Result) {
-	res, ok := result.Result().(map[string]graph.Ref)
-	if !ok {
-		return
-	}
-	s.query.treeifyResult(res)
-}
-
-func (s *Session) Results() (interface{}, error) {
-	s.query.buildResults()
-	if s.query.isError() {
-		return nil, s.query.err
-	}
-	return s.query.results, nil
+	return &mqlIterator{
+		q:   q,
+		col: opt.Collation,
+		it:  it,
+	}, nil
 }
 
 func (s *Session) Clear() {

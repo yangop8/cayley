@@ -30,28 +30,52 @@ import (
 
 	"github.com/cayleygraph/cayley/clog"
 	"github.com/cayleygraph/cayley/graph"
-	"github.com/cayleygraph/cayley/graph/shape"
-	"github.com/cayleygraph/cayley/quad"
 	"github.com/cayleygraph/cayley/query"
+	"github.com/cayleygraph/cayley/query/shape"
+
+	// Writer is imported for writers to be registered
 	_ "github.com/cayleygraph/cayley/writer"
+	"github.com/cayleygraph/quad"
+	"github.com/cayleygraph/quad/voc"
 )
 
+const (
+	prefix             = "/api/v2"
+	defaultLimit       = 100
+	defaultReplication = "single"
+)
+
+// NewAPIv2 creates a new instance of APIv2 with default options
 func NewAPIv2(h *graph.Handle, wrappers ...HandlerWrapper) *APIv2 {
-	return NewAPIv2Writer(h, "single", nil, wrappers...)
+	return NewAPIv2Writer(h, defaultReplication, nil, wrappers...)
 }
 
-func NewAPIv2Writer(h *graph.Handle, wtype string, wopts graph.Options, wrappers ...HandlerWrapper) *APIv2 {
-	api := &APIv2{h: h, wtyp: wtype, wopt: wopts, limit: 100}
-	api.r = httprouter.New()
-	api.RegisterOn(api.r, wrappers...)
+// NewBoundAPIv2 creates a new instance of APIv2 bound to a given httprouter.Router
+func NewBoundAPIv2(h *graph.Handle, r *httprouter.Router) *APIv2 {
+	api := &APIv2{h: h, wtyp: defaultReplication, wopt: nil, limit: defaultLimit, handler: r}
+	api.registerOn(r)
 	return api
 }
 
+// NewAPIv2Writer creates a new instance of APIv2
+func NewAPIv2Writer(h *graph.Handle, wtype string, wopts graph.Options, wrappers ...HandlerWrapper) *APIv2 {
+	r := httprouter.New()
+	api := &APIv2{h: h, wtyp: wtype, wopt: wopts, limit: defaultLimit}
+	api.registerOn(r)
+	var handler http.Handler = r
+	for _, wrapper := range wrappers {
+		handler = wrapper(handler)
+	}
+	api.handler = handler
+	return api
+}
+
+// APIv2 holds state and configuration of a request
 type APIv2 struct {
-	h     *graph.Handle
-	r     *httprouter.Router
-	ro    bool
-	batch int
+	h       *graph.Handle
+	ro      bool
+	batch   int
+	handler http.Handler
 
 	// replication
 	wtyp string
@@ -62,50 +86,61 @@ type APIv2 struct {
 	limit   int
 }
 
+// SetReadOnly sets read-only mode for the request
 func (api *APIv2) SetReadOnly(ro bool) {
 	api.ro = ro
 }
+
+// SetBatchSize sets batch-size mode for the request
 func (api *APIv2) SetBatchSize(n int) {
 	api.batch = n
 }
+
+// SetQueryTimeout sets query timeout for the request
 func (api *APIv2) SetQueryTimeout(dt time.Duration) {
 	api.timeout = dt
 }
+
+// SetQueryLimit sets query limit for the request
 func (api *APIv2) SetQueryLimit(n int) {
 	api.limit = n
 }
+
+// ServeHTTP implements http.Handler
 func (api *APIv2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	api.r.ServeHTTP(w, r)
+	api.handler.ServeHTTP(w, r)
 }
 
-type HandlerWrapper func(httprouter.Handle) httprouter.Handle
+// HandlerWrapper accepts a handler, wraps it with additional functionality and
+// returns a new handler
+type HandlerWrapper func(http.Handler) http.Handler
 
-func wrap(h http.HandlerFunc, arr []HandlerWrapper) httprouter.Handle {
-	wh := func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		h(w, r)
+// toHandle wraps a http.HandlerFunc to comply with the signature of httprouter.Handle
+func toHandle(handler http.HandlerFunc) httprouter.Handle {
+	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		handler(w, r)
 	}
-	for _, w := range arr {
-		wh = w(wh)
-	}
-	return wh
 }
-func (api *APIv2) RegisterDataOn(r *httprouter.Router, wrappers ...HandlerWrapper) {
+
+func (api *APIv2) registerDataOn(r *httprouter.Router) {
 	if !api.ro {
-		r.POST("/api/v2/write", wrap(api.ServeWrite, wrappers))
-		r.POST("/api/v2/delete", wrap(api.ServeDelete, wrappers))
-		r.POST("/api/v2/node/delete", wrap(api.ServeNodeDelete, wrappers))
+		r.POST(prefix+"/write", toHandle(api.ServeWrite))
+		r.POST(prefix+"/delete", toHandle(api.ServeDelete))
+		r.POST(prefix+"/node/delete", toHandle(api.ServeNodeDelete))
 	}
-	r.POST("/api/v2/read", wrap(api.ServeRead, wrappers))
-	r.GET("/api/v2/read", wrap(api.ServeRead, wrappers))
-	r.GET("/api/v2/formats", wrap(api.ServeFormats, wrappers))
+	r.POST(prefix+"/read", toHandle(api.ServeRead))
+	r.GET(prefix+"/read", toHandle(api.ServeRead))
+	r.GET(prefix+"/formats", toHandle(api.ServeFormats))
 }
-func (api *APIv2) RegisterQueryOn(r *httprouter.Router, wrappers ...HandlerWrapper) {
-	r.POST("/api/v2/query", wrap(api.ServeQuery, wrappers))
-	r.GET("/api/v2/query", wrap(api.ServeQuery, wrappers))
+
+func (api *APIv2) registerQueryOn(r *httprouter.Router) {
+	r.POST(prefix+"/query", toHandle(api.ServeQuery))
+	r.GET(prefix+"/query", toHandle(api.ServeQuery))
 }
-func (api *APIv2) RegisterOn(r *httprouter.Router, wrappers ...HandlerWrapper) {
-	api.RegisterDataOn(r, wrappers...)
-	api.RegisterQueryOn(r, wrappers...)
+
+func (api *APIv2) registerOn(r *httprouter.Router) {
+	api.registerDataOn(r)
+	api.registerQueryOn(r)
 }
 
 const (
@@ -115,6 +150,7 @@ const (
 	hdrAccept          = "Accept"
 	hdrAcceptEncoding  = "Accept-Encoding"
 	contentTypeJSON    = "application/json"
+	contentTypeJSONLD  = "application/ld+json"
 )
 
 func getFormat(r *http.Request, formKey string, acceptName string) *quad.Format {
@@ -171,6 +207,21 @@ func (api *APIv2) handleForRequest(r *http.Request) (*graph.Handle, error) {
 	return HandleForRequest(api.h, api.wtyp, api.wopt, r)
 }
 
+// writeResponse represents the response received for a successful write
+type writeResponse struct {
+	Result string `json:"result"`
+	Count  int    `json:"count"`
+}
+
+// newWriteResponse creates a new WriteResponse for given count of quads written
+func newWriteResponse(count int) writeResponse {
+	return writeResponse{
+		Result: fmt.Sprintf("Successfully wrote %d quads.", count),
+		Count:  count,
+	}
+}
+
+// ServeWrite writes data received in the request body to the database
 func (api *APIv2) ServeWrite(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	if api.ro {
@@ -208,9 +259,13 @@ func (api *APIv2) ServeWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set(hdrContentType, contentTypeJSON)
-	fmt.Fprintf(w, `{"result": "Successfully wrote %d quads.", "count": %d}`+"\n", n, n)
+	response := newWriteResponse(n)
+	encoder := json.NewEncoder(w)
+	encoder.Encode(response)
 }
 
+// ServeDelete deletes data received in the request body from the database.
+// Responds with how many quads were deleted.
 func (api *APIv2) ServeDelete(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	if api.ro {
@@ -246,6 +301,8 @@ func (api *APIv2) ServeDelete(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"result": "Successfully deleted %d quads.", "count": %d}`+"\n", n, n)
 }
 
+// ServeNodeDelete deletes all data associated with a node (an entity).
+// Responds with how many quads were deleted.
 func (api *APIv2) ServeNodeDelete(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	if api.ro {
@@ -312,6 +369,7 @@ func valuesFromString(s string) []quad.Value {
 	return out
 }
 
+// ServeRead responds with quads read from the database
 func (api *APIv2) ServeRead(w http.ResponseWriter, r *http.Request) {
 	format := getFormat(r, "format", hdrAccept)
 	if format == nil || format.Writer == nil {
@@ -329,7 +387,7 @@ func (api *APIv2) ServeRead(w http.ResponseWriter, r *http.Request) {
 		valuesFromString(r.FormValue("obj")),
 		valuesFromString(r.FormValue("label")),
 	)
-	it := values.BuildIterator(h.QuadStore)
+	it := values.BuildIterator(h.QuadStore).Iterate()
 	qr := graph.NewResultReader(h.QuadStore, it)
 
 	defer qr.Close()
@@ -371,9 +429,10 @@ func (api *APIv2) ServeRead(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ServeFormats responds with formats known for the database
 func (api *APIv2) ServeFormats(w http.ResponseWriter, r *http.Request) {
 	type Format struct {
-		Id     string   `json:"id"`
+		ID     string   `json:"id"`
 		Read   bool     `json:"read,omitempty"`
 		Write  bool     `json:"write,omitempty"`
 		Nodes  bool     `json:"nodes,omitempty"`
@@ -385,7 +444,7 @@ func (api *APIv2) ServeFormats(w http.ResponseWriter, r *http.Request) {
 	out := make([]Format, 0, len(formats))
 	for _, f := range formats {
 		out = append(out, Format{
-			Id:  f.Name,
+			ID:  f.Name,
 			Ext: f.Ext, Mime: f.Mime,
 			Read: f.Reader != nil, Write: f.Writer != nil,
 			Nodes:  f.UnmarshalValue != nil,
@@ -397,7 +456,7 @@ func (api *APIv2) ServeFormats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (api *APIv2) queryContext(r *http.Request) (ctx context.Context, cancel func()) {
-	ctx = context.TODO() // TODO(dennwc): get from request
+	ctx = r.Context()
 	if api.timeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, api.timeout)
 	} else {
@@ -415,9 +474,11 @@ func defaultErrorFunc(w query.ResponseWriter, err error) {
 }
 
 func writeResults(w io.Writer, r interface{}) {
-	w.Write([]byte(`{"result": `))
-	json.NewEncoder(w).Encode(r)
-	w.Write([]byte("}\n"))
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	enc.Encode(map[string]interface{}{
+		"result": r,
+	})
 }
 
 const maxQuerySize = 1024 * 1024 // 1 MB
@@ -430,6 +491,7 @@ func readLimit(r io.Reader) ([]byte, error) {
 	return data, err
 }
 
+// ServeQuery executes a query received in the request and responds with the result
 func (api *APIv2) ServeQuery(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := api.queryContext(r)
 	defer cancel()
@@ -464,11 +526,11 @@ func (api *APIv2) ServeQuery(w http.ResponseWriter, r *http.Request) {
 		l.HTTPQuery(ctx, h.QuadStore, w, r.Body)
 		return
 	}
-	if l.HTTP == nil {
+	if l.Session == nil {
 		errFunc(w, errors.New("HTTP interface is not supported for this query language"))
 		return
 	}
-	ses := l.HTTP(h.QuadStore)
+	ses := l.Session(h.QuadStore)
 	var qu string
 	if r.Method == "GET" {
 		qu = vals.Get("qu")
@@ -488,23 +550,91 @@ func (api *APIv2) ServeQuery(w http.ResponseWriter, r *http.Request) {
 		clog.Infof("query: %s: %q", lang, qu)
 	}
 
-	c := make(chan query.Result, 5)
-	go ses.Execute(ctx, qu, c, api.limit)
-
-	for res := range c {
-		if err := res.Err(); err != nil {
-			if err == nil {
-				continue // wait for results channel to close
-			}
-			errFunc(w, err)
-			return
-		}
-		ses.Collate(res)
+	opt := query.Options{
+		Collation: query.JSON, // TODO: switch to JSON-LD by default when the time comes
+		Limit:     api.limit,
 	}
-	output, err := ses.Results()
+	if specs := ParseAccept(r.Header, hdrAccept); len(specs) != 0 {
+		// TODO: sort by Q
+		switch specs[0].Value {
+		case contentTypeJSON:
+			opt.Collation = query.JSON
+		case contentTypeJSONLD:
+			opt.Collation = query.JSONLD
+		}
+	}
+	it, err := ses.Execute(ctx, qu, opt)
 	if err != nil {
 		errFunc(w, err)
 		return
 	}
-	writeResults(w, output)
+	defer it.Close()
+
+	var out []interface{}
+	for it.Next(ctx) {
+		out = append(out, it.Result())
+	}
+	if err = it.Err(); err != nil {
+		errFunc(w, err)
+		return
+	}
+	if opt.Collation == query.JSONLD {
+		w.Header().Set(hdrContentType, contentTypeJSONLD)
+	} else {
+		w.Header().Set(hdrContentType, contentTypeJSON)
+	}
+	writeResults(w, out)
+}
+
+// NamespaceRule defines a prefix for a namespace when prepended to the suffix of a compact IRI, results in an IRI.
+// For example rdfs is a prefix for the namespace http://www.w3.org/2000/01/rdf-schema#.
+type NamespaceRule struct {
+	Prefix    string `json:"prefix"`
+	Namespace string `json:"namespace"`
+}
+
+// getNamespaceRules returns all the registered rules
+func getNamespaceRules() []NamespaceRule {
+	var rules []NamespaceRule
+	for _, n := range voc.List() {
+		rules = append(rules, NamespaceRule{
+			Prefix:    strings.TrimSuffix(n.Prefix, ":"),
+			Namespace: n.Full,
+		})
+	}
+	return rules
+}
+
+// serveGetNamespaceRules responds with all the registered rules encoded to JSON
+func serveGetNamespaceRules(w http.ResponseWriter) {
+	rules := getNamespaceRules()
+	encoder := json.NewEncoder(w)
+	w.Header().Set(hdrContentType, contentTypeJSON)
+	w.WriteHeader(http.StatusOK)
+	encoder.Encode(rules)
+}
+
+// serveGetNamespaceRules registers received rule encoded in JSON
+func servePostNamespaceRules(w http.ResponseWriter, r *http.Request) {
+	var rule NamespaceRule
+	decoder := json.NewDecoder(r.Body)
+	decoder.Decode(&rule)
+	voc.RegisterPrefix(rule.Prefix, rule.Namespace)
+	w.WriteHeader(http.StatusCreated)
+}
+
+// ServeNamespaceRules serves requests for the namespace rules resource.
+// The resource supports getting all registered rules and registering a rule.
+// The resource wraps the quad/voc module.
+func (api *APIv2) ServeNamespaceRules(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		serveGetNamespaceRules(w)
+		return
+	case http.MethodPost:
+		servePostNamespaceRules(w, r)
+		return
+	default:
+		jsonResponse(w, http.StatusMethodNotAllowed, nil)
+	}
 }

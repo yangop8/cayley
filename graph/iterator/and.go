@@ -18,68 +18,22 @@ package iterator
 import (
 	"context"
 
-	"github.com/cayleygraph/cayley/graph"
+	"github.com/cayleygraph/cayley/graph/refs"
 )
-
-var _ graph.IteratorFuture = &And{}
 
 // The And iterator. Consists of a number of subiterators, the primary of which will
 // be Next()ed if next is called.
 type And struct {
-	it *and
-	graph.Iterator
+	sub       []Shape
+	checkList []Shape // special order for Contains
+	opt       []Shape
 }
 
 // NewAnd creates an And iterator. `qs` is only required when needing a handle
 // for QuadStore-specific optimizations, otherwise nil is acceptable.
-func NewAnd(sub ...graph.Iterator) *And {
+func NewAnd(sub ...Shape) *And {
 	it := &And{
-		it: newAnd(),
-	}
-	for _, s := range sub {
-		it.it.AddSubIterator(graph.AsShape(s))
-	}
-	it.Iterator = graph.NewLegacy(it.it, it)
-	return it
-}
-
-func (it *And) AsShape() graph.IteratorShape {
-	it.Close()
-	return it.it
-}
-
-// Add a subiterator to this And iterator.
-//
-// The first iterator that is added becomes the primary iterator. This is
-// important. Calling Optimize() is the way to change the order based on
-// subiterator statistics. Without Optimize(), the order added is the order
-// used.
-func (it *And) AddSubIterator(sub graph.Iterator) {
-	it.it.AddSubIterator(graph.AsShape(sub))
-}
-
-// AddOptionalIterator adds an iterator that will only be Contain'ed and will not affect iteration results.
-// Only tags will be propagated from this iterator.
-func (it *And) AddOptionalIterator(sub graph.Iterator) *And {
-	it.it.AddOptionalIterator(graph.AsShape(sub))
-	return it
-}
-
-var _ graph.IteratorShapeCompat = &and{}
-
-// The And iterator. Consists of a number of subiterators, the primary of which will
-// be Next()ed if next is called.
-type and struct {
-	sub       []graph.IteratorShape
-	checkList []graph.IteratorShape // special order for Contains
-	opt       []graph.IteratorShape
-}
-
-// NewAnd creates an And iterator. `qs` is only required when needing a handle
-// for QuadStore-specific optimizations, otherwise nil is acceptable.
-func newAnd(sub ...graph.IteratorShape) *and {
-	it := &and{
-		sub: make([]graph.IteratorShape, 0, 20),
+		sub: make([]Shape, 0, 20),
 	}
 	for _, s := range sub {
 		it.AddSubIterator(s)
@@ -87,26 +41,26 @@ func newAnd(sub ...graph.IteratorShape) *and {
 	return it
 }
 
-func (it *and) Iterate() graph.Scanner {
+func (it *And) Iterate() Scanner {
 	if len(it.sub) == 0 {
-		return newNull().Iterate()
+		return NewNull().Iterate()
 	}
-	sub := make([]graph.Index, 0, len(it.sub)-1)
+	sub := make([]Index, 0, len(it.sub)-1)
 	for _, s := range it.sub[1:] {
 		sub = append(sub, s.Lookup())
 	}
-	opt := make([]graph.Index, 0, len(it.opt))
+	opt := make([]Index, 0, len(it.opt))
 	for _, s := range it.opt {
 		opt = append(opt, s.Lookup())
 	}
 	return newAndNext(it.sub[0].Iterate(), newAndContains(sub, opt))
 }
 
-func (it *and) Lookup() graph.Index {
+func (it *And) Lookup() Index {
 	if len(it.sub) == 0 {
-		return newNull().Lookup()
+		return NewNull().Lookup()
 	}
-	sub := make([]graph.Index, 0, len(it.sub))
+	sub := make([]Index, 0, len(it.sub))
 	check := it.checkList
 	if check == nil {
 		check = it.sub
@@ -114,28 +68,22 @@ func (it *and) Lookup() graph.Index {
 	for _, s := range check {
 		sub = append(sub, s.Lookup())
 	}
-	opt := make([]graph.Index, 0, len(it.opt))
+	opt := make([]Index, 0, len(it.opt))
 	for _, s := range it.opt {
 		opt = append(opt, s.Lookup())
 	}
 	return newAndContains(sub, opt)
 }
 
-func (it *and) AsLegacy() graph.Iterator {
-	it2 := &And{it: it}
-	it2.Iterator = graph.NewLegacy(it, it2)
-	return it2
-}
-
 // Returns a slice of the subiterators, in order (primary iterator first).
-func (it *and) SubIterators() []graph.IteratorShape {
-	iters := make([]graph.IteratorShape, 0, len(it.sub)+len(it.opt))
+func (it *And) SubIterators() []Shape {
+	iters := make([]Shape, 0, len(it.sub)+len(it.opt))
 	iters = append(iters, it.sub...)
 	iters = append(iters, it.opt...)
 	return iters
 }
 
-func (it *and) String() string {
+func (it *And) String() string {
 	return "And"
 }
 
@@ -145,7 +93,7 @@ func (it *and) String() string {
 // important. Calling Optimize() is the way to change the order based on
 // subiterator statistics. Without Optimize(), the order added is the order
 // used.
-func (it *and) AddSubIterator(sub graph.IteratorShape) {
+func (it *And) AddSubIterator(sub Shape) {
 	if sub == nil {
 		panic("nil iterator")
 	}
@@ -154,7 +102,7 @@ func (it *and) AddSubIterator(sub graph.IteratorShape) {
 
 // AddOptionalIterator adds an iterator that will only be Contain'ed and will not affect iteration results.
 // Only tags will be propagated from this iterator.
-func (it *and) AddOptionalIterator(sub graph.IteratorShape) *and {
+func (it *And) AddOptionalIterator(sub Shape) *And {
 	it.opt = append(it.opt, sub)
 	return it
 }
@@ -162,14 +110,14 @@ func (it *and) AddOptionalIterator(sub graph.IteratorShape) *and {
 // The And iterator. Consists of a number of subiterators, the primary of which will
 // be Next()ed if next is called.
 type andNext struct {
-	primary   graph.Scanner
-	secondary graph.Index
-	result    graph.Ref
+	primary   Scanner
+	secondary Index
+	result    refs.Ref
 }
 
 // NewAnd creates an And iterator. `qs` is only required when needing a handle
 // for QuadStore-specific optimizations, otherwise nil is acceptable.
-func newAndNext(pri graph.Scanner, sec graph.Index) graph.Scanner {
+func newAndNext(pri Scanner, sec Index) Scanner {
 	return &andNext{
 		primary:   pri,
 		secondary: sec,
@@ -178,7 +126,7 @@ func newAndNext(pri graph.Scanner, sec graph.Index) graph.Scanner {
 
 // An extended TagResults, as it needs to add it's own results and
 // recurse down it's subiterators.
-func (it *andNext) TagResults(dst map[string]graph.Ref) {
+func (it *andNext) TagResults(dst map[string]refs.Ref) {
 	it.primary.TagResults(dst)
 	it.secondary.TagResults(dst)
 }
@@ -212,7 +160,7 @@ func (it *andNext) Err() error {
 	return nil
 }
 
-func (it *andNext) Result() graph.Ref {
+func (it *andNext) Result() refs.Ref {
 	return it.result
 }
 
@@ -248,18 +196,18 @@ func (it *andNext) Close() error {
 // The And iterator. Consists of a number of subiterators, the primary of which will
 // be Next()ed if next is called.
 type andContains struct {
-	base     graph.IteratorShape
-	sub      []graph.Index
-	opt      []graph.Index
+	base     Shape
+	sub      []Index
+	opt      []Index
 	optCheck []bool
 
-	result graph.Ref
+	result refs.Ref
 	err    error
 }
 
 // NewAnd creates an And iterator. `qs` is only required when needing a handle
 // for QuadStore-specific optimizations, otherwise nil is acceptable.
-func newAndContains(sub, opt []graph.Index) graph.Index {
+func newAndContains(sub, opt []Index) Index {
 	return &andContains{
 		sub: sub,
 		opt: opt, optCheck: make([]bool, len(opt)),
@@ -268,7 +216,7 @@ func newAndContains(sub, opt []graph.Index) graph.Index {
 
 // An extended TagResults, as it needs to add it's own results and
 // recurse down it's subiterators.
-func (it *andContains) TagResults(dst map[string]graph.Ref) {
+func (it *andContains) TagResults(dst map[string]refs.Ref) {
 	for _, sub := range it.sub {
 		sub.TagResults(dst)
 	}
@@ -301,12 +249,12 @@ func (it *andContains) Err() error {
 	return nil
 }
 
-func (it *andContains) Result() graph.Ref {
+func (it *andContains) Result() refs.Ref {
 	return it.result
 }
 
 // Check a value against the entire iterator, in order.
-func (it *andContains) Contains(ctx context.Context, val graph.Ref) bool {
+func (it *andContains) Contains(ctx context.Context, val refs.Ref) bool {
 	prev := it.result
 	for i, sub := range it.sub {
 		if !sub.Contains(ctx, val) {

@@ -1,13 +1,14 @@
 package sql
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/iterator"
-	"github.com/cayleygraph/cayley/graph/shape"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/cayley/query/shape"
+	"github.com/cayleygraph/quad"
 	"github.com/stretchr/testify/require"
 )
 
@@ -364,7 +365,7 @@ func TestSQLShapes(t *testing.T) {
 	for _, c := range shapeCases {
 		t.Run(c.name, func(t *testing.T) {
 			opt := NewOptimizer()
-			s, ok := c.s.Optimize(opt)
+			s, ok := c.s.Optimize(context.TODO(), opt)
 			if c.skip {
 				t.Skipf("%#v", s)
 			}

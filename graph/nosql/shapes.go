@@ -1,6 +1,7 @@
 package nosql
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"strconv"
@@ -9,13 +10,13 @@ import (
 
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/iterator"
-	"github.com/cayleygraph/cayley/graph/shape"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/cayley/query/shape"
+	"github.com/cayleygraph/quad"
 )
 
 var _ shape.Optimizer = (*QuadStore)(nil)
 
-func (qs *QuadStore) OptimizeShape(s shape.Shape) (shape.Shape, bool) {
+func (qs *QuadStore) OptimizeShape(ctx context.Context, s shape.Shape) (shape.Shape, bool) {
 	switch s := s.(type) {
 	case shape.Quads:
 		return qs.optimizeQuads(s)
@@ -24,7 +25,7 @@ func (qs *QuadStore) OptimizeShape(s shape.Shape) (shape.Shape, bool) {
 	case shape.Page:
 		return qs.optimizePage(s)
 	case shape.Composite:
-		if s2, opt := s.Simplify().Optimize(qs); opt {
+		if s2, opt := s.Simplify().Optimize(ctx, qs); opt {
 			return s2, true
 		}
 	}
@@ -38,15 +39,15 @@ type Shape struct {
 	Limit      int64               // limits a number of documents
 }
 
-func (s Shape) BuildIterator(qs graph.QuadStore) graph.Iterator {
+func (s Shape) BuildIterator(qs graph.QuadStore) iterator.Shape {
 	db, ok := qs.(*QuadStore)
 	if !ok {
 		return iterator.NewError(fmt.Errorf("not a nosql database: %T", qs))
 	}
-	return NewIterator(db, s.Collection, s.Filters...)
+	return db.newIterator(s.Collection, s.Filters...)
 }
 
-func (s Shape) Optimize(r shape.Optimizer) (shape.Shape, bool) {
+func (s Shape) Optimize(ctx context.Context, r shape.Optimizer) (shape.Shape, bool) {
 	return s, false
 }
 
@@ -56,15 +57,15 @@ type Quads struct {
 	Limit int64     // limits a number of documents
 }
 
-func (s Quads) BuildIterator(qs graph.QuadStore) graph.Iterator {
+func (s Quads) BuildIterator(qs graph.QuadStore) iterator.Shape {
 	db, ok := qs.(*QuadStore)
 	if !ok {
 		return iterator.NewError(fmt.Errorf("not a nosql database: %T", qs))
 	}
-	return NewLinksToIterator(db, colQuads, s.Links)
+	return db.newLinksToIterator(colQuads, s.Links)
 }
 
-func (s Quads) Optimize(r shape.Optimizer) (shape.Shape, bool) {
+func (s Quads) Optimize(ctx context.Context, r shape.Optimizer) (shape.Shape, bool) {
 	return s, false
 }
 

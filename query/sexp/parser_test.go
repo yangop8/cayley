@@ -19,11 +19,11 @@ import (
 	"testing"
 
 	"github.com/cayleygraph/cayley/graph"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/quad"
 
 	"github.com/cayleygraph/cayley/graph/graphtest/testutil"
 	_ "github.com/cayleygraph/cayley/graph/memstore"
-	sh "github.com/cayleygraph/cayley/graph/shape"
+	sh "github.com/cayleygraph/cayley/query/shape"
 	_ "github.com/cayleygraph/cayley/writer"
 	"github.com/stretchr/testify/require"
 )
@@ -166,10 +166,10 @@ func TestSexp(t *testing.T) {
 			qs, _ := graph.NewQuadStore("memstore", "", nil)
 			_ = testutil.MakeWriter(t, qs, nil, test.add...)
 
-			s, _ := BuildShape(test.query)
+			s, _ := BuildShape(ctx, test.query)
 			require.Equal(t, test.shape, s, "%s\n%#v\nvs\n%#v", test.message, test.shape, s)
 
-			it := BuildIteratorTreeForQuery(qs, test.query)
+			it := BuildIteratorTreeForQuery(ctx, qs, test.query).Iterate()
 			if it.Next(ctx) != (test.expect != "") {
 				t.Errorf("Failed to %s", test.message)
 			}

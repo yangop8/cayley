@@ -44,6 +44,9 @@ func getBoltFile(cfgpath string) string {
 }
 
 func Create(path string, _ graph.Options) (hkv.KV, error) {
+	if path == "" {
+		return nil, kv.ErrEmptyPath
+	}
 	err := os.MkdirAll(path, 0700)
 	if err != nil {
 		return nil, err
@@ -69,6 +72,7 @@ func Open(path string, opt graph.Options) (hkv.KV, error) {
 		db.Close()
 		return nil, err
 	}
+	bdb.NoGrowSync = bdb.NoSync
 	if bdb.NoSync {
 		clog.Infof("Running in nosync mode")
 	}

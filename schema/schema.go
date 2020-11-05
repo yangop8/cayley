@@ -13,10 +13,17 @@ import (
 	"unicode/utf8"
 
 	"github.com/cayleygraph/cayley/graph"
-	"github.com/cayleygraph/cayley/graph/path"
-	"github.com/cayleygraph/cayley/quad"
-	"github.com/cayleygraph/cayley/voc/rdf"
+	"github.com/cayleygraph/cayley/query/path"
+	"github.com/cayleygraph/quad"
+	"github.com/cayleygraph/quad/voc/rdf"
 )
+
+var global = NewConfig()
+
+// Global returns a default global schema config.
+func Global() *Config {
+	return global
+}
 
 var reflQuadValue = reflect.TypeOf((*quad.Value)(nil)).Elem()
 
@@ -64,9 +71,6 @@ type Config struct {
 
 func (c *Config) genID(o interface{}) quad.Value {
 	gen := c.GenerateID
-	if gen == nil {
-		gen = GenerateID
-	}
 	if gen == nil {
 		gen = func(_ interface{}) quad.Value {
 			return quad.RandomBlankNode()
@@ -192,9 +196,8 @@ func (c Config) fieldRule(fld reflect.StructField) (rule, error) {
 	p := c.toIRI(ps)
 	if vs == "" || vs == any && fld.Type != reflEmptyStruct {
 		return saveRule{Pred: p, Rev: rev, Opt: opt}, nil
-	} else {
-		return constraintRule{Pred: p, Val: c.toIRI(vs), Rev: rev}, nil
 	}
+	return constraintRule{Pred: p, Val: c.toIRI(vs), Rev: rev}, nil
 }
 
 func checkFieldType(ftp reflect.Type) error {

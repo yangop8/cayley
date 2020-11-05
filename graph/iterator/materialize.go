@@ -20,89 +20,53 @@ import (
 	"context"
 
 	"github.com/cayleygraph/cayley/clog"
-	"github.com/cayleygraph/cayley/graph"
+	"github.com/cayleygraph/cayley/graph/refs"
 )
 
 const MaterializeLimit = 1000
 
 type result struct {
-	id   graph.Ref
-	tags map[string]graph.Ref
+	id   refs.Ref
+	tags map[string]refs.Ref
 }
-
-var _ graph.IteratorFuture = &Materialize{}
 
 type Materialize struct {
-	it *materialize
-	graph.Iterator
-}
-
-func NewMaterialize(sub graph.Iterator) *Materialize {
-	it := &Materialize{
-		it: newMaterialize(graph.AsShape(sub)),
-	}
-	it.Iterator = graph.NewLegacy(it.it, it)
-	return it
-}
-
-func NewMaterializeWithSize(sub graph.Iterator, size int64) *Materialize {
-	it := &Materialize{
-		it: newMaterializeWithSize(graph.AsShape(sub), size),
-	}
-	it.Iterator = graph.NewLegacy(it.it, it)
-	return it
-}
-
-func (it *Materialize) AsShape() graph.IteratorShape {
-	it.Close()
-	return it.it
-}
-
-var _ graph.IteratorShapeCompat = &materialize{}
-
-type materialize struct {
-	sub        graph.IteratorShape
+	sub        Shape
 	expectSize int64
 }
 
-func newMaterialize(sub graph.IteratorShape) *materialize {
-	return newMaterializeWithSize(sub, 0)
+func NewMaterialize(sub Shape) *Materialize {
+	return NewMaterializeWithSize(sub, 0)
 }
 
-func newMaterializeWithSize(sub graph.IteratorShape, size int64) *materialize {
-	return &materialize{
+func NewMaterializeWithSize(sub Shape, size int64) *Materialize {
+	return &Materialize{
 		sub:        sub,
 		expectSize: size,
 	}
 }
 
-func (it *materialize) Iterate() graph.Scanner {
+func (it *Materialize) Iterate() Scanner {
 	return newMaterializeNext(it.sub)
 }
 
-func (it *materialize) Lookup() graph.Index {
+func (it *Materialize) Lookup() Index {
 	return newMaterializeContains(it.sub)
 }
 
-func (it *materialize) AsLegacy() graph.Iterator {
-	it2 := &Materialize{it: it}
-	it2.Iterator = graph.NewLegacy(it, it2)
-	return it2
-}
-
-func (it *materialize) String() string {
+func (it *Materialize) String() string {
 	return "Materialize"
 }
 
-func (it *materialize) SubIterators() []graph.IteratorShape {
-	return []graph.IteratorShape{it.sub}
+func (it *Materialize) SubIterators() []Shape {
+	return []Shape{it.sub}
 }
 
-func (it *materialize) Optimize(ctx context.Context) (graph.IteratorShape, bool) {
+func (it *Materialize) Optimize(ctx context.Context) (Shape, bool) {
 	newSub, changed := it.sub.Optimize(ctx)
 	if changed {
 		it.sub = newSub
-		if IsNull2(it.sub) {
+		if IsNull(it.sub) {
 			return it.sub, true
 		}
 	}
@@ -111,16 +75,16 @@ func (it *materialize) Optimize(ctx context.Context) (graph.IteratorShape, bool)
 
 // The entire point of Materialize is to amortize the cost by
 // putting it all up front.
-func (it *materialize) Stats(ctx context.Context) (graph.IteratorCosts, error) {
+func (it *Materialize) Stats(ctx context.Context) (Costs, error) {
 	overhead := int64(2)
-	var size graph.Size
+	var size refs.Size
 	subitStats, err := it.sub.Stats(ctx)
 	if it.expectSize > 0 {
-		size = graph.Size{Size: it.expectSize, Exact: false}
+		size = refs.Size{Value: it.expectSize, Exact: false}
 	} else {
 		size = subitStats.Size
 	}
-	return graph.IteratorCosts{
+	return Costs{
 		ContainsCost: overhead * subitStats.NextCost,
 		NextCost:     overhead * subitStats.NextCost,
 		Size:         size,
@@ -128,8 +92,8 @@ func (it *materialize) Stats(ctx context.Context) (graph.IteratorCosts, error) {
 }
 
 type materializeNext struct {
-	sub  graph.IteratorShape
-	next graph.Scanner
+	sub  Shape
+	next Scanner
 
 	containsMap map[interface{}]int
 	values      [][]result
@@ -140,7 +104,7 @@ type materializeNext struct {
 	err         error
 }
 
-func newMaterializeNext(sub graph.IteratorShape) *materializeNext {
+func newMaterializeNext(sub Shape) *materializeNext {
 	return &materializeNext{
 		containsMap: make(map[interface{}]int),
 		sub:         sub,
@@ -156,7 +120,7 @@ func (it *materializeNext) Close() error {
 	return it.next.Close()
 }
 
-func (it *materializeNext) TagResults(dst map[string]graph.Ref) {
+func (it *materializeNext) TagResults(dst map[string]refs.Ref) {
 	if !it.hasRun {
 		return
 	}
@@ -176,7 +140,7 @@ func (it *materializeNext) String() string {
 	return "Materialize"
 }
 
-func (it *materializeNext) Result() graph.Ref {
+func (it *materializeNext) Result() refs.Ref {
 	if it.aborted {
 		return it.next.Result()
 	}
@@ -247,16 +211,16 @@ func (it *materializeNext) materializeSet(ctx context.Context) {
 			break
 		}
 		id := it.next.Result()
-		val := graph.ToKey(id)
+		val := refs.ToKey(id)
 		if _, ok := it.containsMap[val]; !ok {
 			it.containsMap[val] = len(it.values)
 			it.values = append(it.values, nil)
 		}
 		index := it.containsMap[val]
-		tags := make(map[string]graph.Ref, mn)
+		tags := make(map[string]refs.Ref, mn)
 		it.next.TagResults(tags)
 		if n := len(tags); n > mn {
-			n = mn
+			mn = n
 		}
 		it.values[index] = append(it.values[index], result{id: id, tags: tags})
 		for it.next.NextPath(ctx) {
@@ -265,10 +229,10 @@ func (it *materializeNext) materializeSet(ctx context.Context) {
 				it.aborted = true
 				break
 			}
-			tags := make(map[string]graph.Ref, mn)
+			tags := make(map[string]refs.Ref, mn)
 			it.next.TagResults(tags)
 			if n := len(tags); n > mn {
-				n = mn
+				mn = n
 			}
 			it.values[index] = append(it.values[index], result{id: id, tags: tags})
 		}
@@ -288,10 +252,10 @@ func (it *materializeNext) materializeSet(ctx context.Context) {
 
 type materializeContains struct {
 	next *materializeNext
-	sub  graph.Index // only set if aborted
+	sub  Index // only set if aborted
 }
 
-func newMaterializeContains(sub graph.IteratorShape) *materializeContains {
+func newMaterializeContains(sub Shape) *materializeContains {
 	return &materializeContains{
 		next: newMaterializeNext(sub),
 	}
@@ -307,7 +271,7 @@ func (it *materializeContains) Close() error {
 	return err
 }
 
-func (it *materializeContains) TagResults(dst map[string]graph.Ref) {
+func (it *materializeContains) TagResults(dst map[string]refs.Ref) {
 	if it.sub != nil {
 		it.sub.TagResults(dst)
 		return
@@ -319,7 +283,7 @@ func (it *materializeContains) String() string {
 	return "MaterializeContains"
 }
 
-func (it *materializeContains) Result() graph.Ref {
+func (it *materializeContains) Result() refs.Ref {
 	if it.sub != nil {
 		return it.sub.Result()
 	}
@@ -342,7 +306,7 @@ func (it *materializeContains) run(ctx context.Context) {
 	}
 }
 
-func (it *materializeContains) Contains(ctx context.Context, v graph.Ref) bool {
+func (it *materializeContains) Contains(ctx context.Context, v refs.Ref) bool {
 	if !it.next.hasRun {
 		it.run(ctx)
 	}
@@ -352,7 +316,7 @@ func (it *materializeContains) Contains(ctx context.Context, v graph.Ref) bool {
 	if it.sub != nil {
 		return it.sub.Contains(ctx, v)
 	}
-	key := graph.ToKey(v)
+	key := refs.ToKey(v)
 	if i, ok := it.next.containsMap[key]; ok {
 		it.next.index = i
 		it.next.subindex = 0

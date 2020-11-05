@@ -15,14 +15,15 @@
 package sql
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/iterator"
-	"github.com/cayleygraph/cayley/graph/shape"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/cayley/query/shape"
+	"github.com/cayleygraph/quad"
 )
 
 var DefaultDialect = QueryDialect{
@@ -266,6 +267,10 @@ type Select struct {
 	Params []Value
 	Limit  int64
 	Offset int64
+
+	// TODO(dennwc): this field in unexported because we don't want it to a be a part of the API
+	//               however, it's necessary to make NodesFrom optimizations to work with SQL
+	nextPath bool
 }
 
 func (s Select) Clone() Select {
@@ -298,15 +303,15 @@ func (s Select) Columns() []string {
 	return names
 }
 
-func (s Select) BuildIterator(qs graph.QuadStore) graph.Iterator {
+func (s Select) BuildIterator(qs graph.QuadStore) iterator.Shape {
 	sq, ok := qs.(*QuadStore)
 	if !ok {
 		return iterator.NewError(fmt.Errorf("not a SQL quadstore: %T", qs))
 	}
-	return sq.NewIterator(s)
+	return sq.newIterator(s)
 }
 
-func (s Select) Optimize(r shape.Optimizer) (shape.Shape, bool) {
+func (s Select) Optimize(ctx context.Context, r shape.Optimizer) (shape.Shape, bool) {
 	// TODO: call optimize on sub-tables? but what if it decides to de-optimize our SQL shape?
 	return s, false
 }

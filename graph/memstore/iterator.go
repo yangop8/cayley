@@ -21,42 +21,20 @@ import (
 	"math"
 
 	"github.com/cayleygraph/cayley/graph"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/cayley/graph/iterator"
+	"github.com/cayleygraph/cayley/graph/refs"
+	"github.com/cayleygraph/quad"
 )
 
-var _ graph.Iterator = &Iterator{}
-
 type Iterator struct {
-	it *iterator2
-	graph.Iterator
-}
-
-func NewIterator(tree *Tree, qs *QuadStore, d quad.Direction, value int64) *Iterator {
-	it := &Iterator{
-		it: newIterator(tree, qs, d, value),
-	}
-	it.Iterator = graph.NewLegacy(it.it, it)
-	return it
-}
-
-func (it *Iterator) AsShape() graph.IteratorShape {
-	it.Close()
-	return it.it
-}
-
-func (it *Iterator) Sorted() bool { return true }
-
-var _ graph.IteratorShapeCompat = &iterator2{}
-
-type iterator2 struct {
 	qs    *QuadStore
 	tree  *Tree
 	d     quad.Direction
 	value int64
 }
 
-func newIterator(tree *Tree, qs *QuadStore, d quad.Direction, value int64) *iterator2 {
-	return &iterator2{
+func (qs *QuadStore) newIterator(tree *Tree, d quad.Direction, value int64) *Iterator {
+	return &Iterator{
 		qs:    qs,
 		tree:  tree,
 		d:     d,
@@ -64,41 +42,35 @@ func newIterator(tree *Tree, qs *QuadStore, d quad.Direction, value int64) *iter
 	}
 }
 
-func (it *iterator2) Iterate() graph.Scanner {
+func (it *Iterator) Iterate() iterator.Scanner {
 	// TODO(dennwc): it doesn't check the direction and value, while Contains does; is it expected?
-	return newIteratorNext(it.tree, it.qs, it.d)
+	return it.qs.newIteratorNext(it.tree, it.d)
 }
 
-func (it *iterator2) Lookup() graph.Index {
-	return newIteratorContains(it.tree, it.qs, it.d, it.value)
+func (it *Iterator) Lookup() iterator.Index {
+	return it.qs.newIteratorContains(it.tree, it.d, it.value)
 }
 
-func (it *iterator2) AsLegacy() graph.Iterator {
-	it2 := &Iterator{it: it}
-	it2.Iterator = graph.NewLegacy(it, it2)
-	return it2
-}
-
-func (it *iterator2) SubIterators() []graph.IteratorShape {
+func (it *Iterator) SubIterators() []iterator.Shape {
 	return nil
 }
 
-func (it *iterator2) String() string {
+func (it *Iterator) String() string {
 	return fmt.Sprintf("MemStore(%v)", it.d)
 }
 
-func (it *iterator2) Sorted() bool { return true }
+func (it *Iterator) Sorted() bool { return true }
 
-func (it *iterator2) Optimize(ctx context.Context) (graph.IteratorShape, bool) {
+func (it *Iterator) Optimize(ctx context.Context) (iterator.Shape, bool) {
 	return it, false
 }
 
-func (it *iterator2) Stats(ctx context.Context) (graph.IteratorCosts, error) {
-	return graph.IteratorCosts{
+func (it *Iterator) Stats(ctx context.Context) (iterator.Costs, error) {
+	return iterator.Costs{
 		ContainsCost: int64(math.Log(float64(it.tree.Len()))) + 1,
 		NextCost:     1,
-		Size: graph.Size{
-			Size:  int64(it.tree.Len()),
+		Size: refs.Size{
+			Value: int64(it.tree.Len()),
 			Exact: true,
 		},
 	}, nil
@@ -111,11 +83,11 @@ type iteratorNext struct {
 	d     quad.Direction
 
 	iter *Enumerator
-	cur  *primitive
+	cur  *Primitive
 	err  error
 }
 
-func newIteratorNext(tree *Tree, qs *QuadStore, d quad.Direction) *iteratorNext {
+func (qs *QuadStore) newIteratorNext(tree *Tree, d quad.Direction) *iteratorNext {
 	return &iteratorNext{
 		nodes: d == 0,
 		d:     d,
@@ -179,13 +151,13 @@ type iteratorContains struct {
 	qs    *QuadStore
 	tree  *Tree
 
-	cur *primitive
+	cur *Primitive
 
 	d     quad.Direction
 	value int64
 }
 
-func newIteratorContains(tree *Tree, qs *QuadStore, d quad.Direction, value int64) *iteratorContains {
+func (qs *QuadStore) newIteratorContains(tree *Tree, d quad.Direction, value int64) *iteratorContains {
 	return &iteratorContains{
 		nodes: d == 0,
 		qs:    qs,

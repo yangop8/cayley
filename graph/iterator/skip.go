@@ -4,65 +4,36 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cayleygraph/cayley/graph"
+	"github.com/cayleygraph/cayley/graph/refs"
 )
-
-var _ graph.IteratorFuture = &Skip{}
 
 // Skip iterator will skip certain number of values from primary iterator.
 type Skip struct {
-	it *skip
-	graph.Iterator
-}
-
-func NewSkip(primaryIt graph.Iterator, skip int64) *Skip {
-	it := &Skip{
-		it: newSkip(graph.AsShape(primaryIt), skip),
-	}
-	it.Iterator = graph.NewLegacy(it.it, it)
-	return it
-}
-
-func (it *Skip) AsShape() graph.IteratorShape {
-	it.Close()
-	return it.it
-}
-
-var _ graph.IteratorShapeCompat = &skip{}
-
-// Skip iterator will skip certain number of values from primary iterator.
-type skip struct {
 	skip      int64
-	primaryIt graph.IteratorShape
+	primaryIt Shape
 }
 
-func newSkip(primaryIt graph.IteratorShape, off int64) *skip {
-	return &skip{
+func NewSkip(primaryIt Shape, off int64) *Skip {
+	return &Skip{
 		skip:      off,
 		primaryIt: primaryIt,
 	}
 }
 
-func (it *skip) Iterate() graph.Scanner {
+func (it *Skip) Iterate() Scanner {
 	return newSkipNext(it.primaryIt.Iterate(), it.skip)
 }
 
-func (it *skip) Lookup() graph.Index {
+func (it *Skip) Lookup() Index {
 	return newSkipContains(it.primaryIt.Lookup(), it.skip)
 }
 
-func (it *skip) AsLegacy() graph.Iterator {
-	it2 := &Skip{it: it}
-	it2.Iterator = graph.NewLegacy(it, it2)
-	return it2
-}
-
 // SubIterators returns a slice of the sub iterators.
-func (it *skip) SubIterators() []graph.IteratorShape {
-	return []graph.IteratorShape{it.primaryIt}
+func (it *Skip) SubIterators() []Shape {
+	return []Shape{it.primaryIt}
 }
 
-func (it *skip) Optimize(ctx context.Context) (graph.IteratorShape, bool) {
+func (it *Skip) Optimize(ctx context.Context) (Shape, bool) {
 	optimizedPrimaryIt, optimized := it.primaryIt.Optimize(ctx)
 	if it.skip == 0 { // nothing to skip
 		return optimizedPrimaryIt, true
@@ -71,18 +42,18 @@ func (it *skip) Optimize(ctx context.Context) (graph.IteratorShape, bool) {
 	return it, optimized
 }
 
-func (it *skip) Stats(ctx context.Context) (graph.IteratorCosts, error) {
+func (it *Skip) Stats(ctx context.Context) (Costs, error) {
 	primaryStats, err := it.primaryIt.Stats(ctx)
 	if primaryStats.Size.Exact {
-		primaryStats.Size.Size -= it.skip
-		if primaryStats.Size.Size < 0 {
-			primaryStats.Size.Size = 0
+		primaryStats.Size.Value -= it.skip
+		if primaryStats.Size.Value < 0 {
+			primaryStats.Size.Value = 0
 		}
 	}
 	return primaryStats, err
 }
 
-func (it *skip) String() string {
+func (it *Skip) String() string {
 	return fmt.Sprintf("Skip(%d)", it.skip)
 }
 
@@ -90,17 +61,17 @@ func (it *skip) String() string {
 type skipNext struct {
 	skip      int64
 	skipped   int64
-	primaryIt graph.Scanner
+	primaryIt Scanner
 }
 
-func newSkipNext(primaryIt graph.Scanner, skip int64) *skipNext {
+func newSkipNext(primaryIt Scanner, skip int64) *skipNext {
 	return &skipNext{
 		skip:      skip,
 		primaryIt: primaryIt,
 	}
 }
 
-func (it *skipNext) TagResults(dst map[string]graph.Ref) {
+func (it *skipNext) TagResults(dst map[string]refs.Ref) {
 	it.primaryIt.TagResults(dst)
 }
 
@@ -122,7 +93,7 @@ func (it *skipNext) Err() error {
 	return it.primaryIt.Err()
 }
 
-func (it *skipNext) Result() graph.Ref {
+func (it *skipNext) Result() refs.Ref {
 	return it.primaryIt.Result()
 }
 
@@ -151,17 +122,17 @@ func (it *skipNext) String() string {
 type skipContains struct {
 	skip      int64
 	skipped   int64
-	primaryIt graph.Index
+	primaryIt Index
 }
 
-func newSkipContains(primaryIt graph.Index, skip int64) *skipContains {
+func newSkipContains(primaryIt Index, skip int64) *skipContains {
 	return &skipContains{
 		skip:      skip,
 		primaryIt: primaryIt,
 	}
 }
 
-func (it *skipContains) TagResults(dst map[string]graph.Ref) {
+func (it *skipContains) TagResults(dst map[string]refs.Ref) {
 	it.primaryIt.TagResults(dst)
 }
 
@@ -169,11 +140,11 @@ func (it *skipContains) Err() error {
 	return it.primaryIt.Err()
 }
 
-func (it *skipContains) Result() graph.Ref {
+func (it *skipContains) Result() refs.Ref {
 	return it.primaryIt.Result()
 }
 
-func (it *skipContains) Contains(ctx context.Context, val graph.Ref) bool {
+func (it *skipContains) Contains(ctx context.Context, val refs.Ref) bool {
 	inNextPath := false
 	for it.skipped <= it.skip {
 		// skipping main iterator results

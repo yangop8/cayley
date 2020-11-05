@@ -20,10 +20,12 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cayleygraph/cayley/graph"
+	"github.com/stretchr/testify/require"
+
 	"github.com/cayleygraph/cayley/graph/graphmock"
 	. "github.com/cayleygraph/cayley/graph/iterator"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/cayley/graph/refs"
+	"github.com/cayleygraph/quad"
 )
 
 var (
@@ -61,7 +63,7 @@ var comparisonTests = []struct {
 	operand  quad.Value
 	operator Operator
 	expect   []quad.Value
-	qs       graph.Namer
+	qs       refs.Namer
 	iterator func() *Fixed
 }{
 	{
@@ -142,7 +144,7 @@ func TestValueComparison(t *testing.T) {
 	ctx := context.TODO()
 	for _, test := range comparisonTests {
 		qs := test.qs
-		vc := NewComparison(test.iterator(), test.operator, test.operand, qs)
+		vc := NewComparison(test.iterator(), test.operator, test.operand, qs).Iterate()
 
 		var got []quad.Value
 		for vc.Next(ctx) {
@@ -157,9 +159,9 @@ func TestValueComparison(t *testing.T) {
 var vciContainsTests = []struct {
 	message  string
 	operator Operator
-	check    graph.Ref
+	check    refs.Ref
 	expect   bool
-	qs       graph.Namer
+	qs       refs.Namer
 	val      quad.Value
 	iterator func() *Fixed
 }{
@@ -231,7 +233,7 @@ var vciContainsTests = []struct {
 func TestVCIContains(t *testing.T) {
 	ctx := context.TODO()
 	for _, test := range vciContainsTests {
-		vc := NewComparison(test.iterator(), test.operator, test.val, test.qs)
+		vc := NewComparison(test.iterator(), test.operator, test.val, test.qs).Lookup()
 		if vc.Contains(ctx, test.check) != test.expect {
 			t.Errorf("Failed to show %s", test.message)
 		}
@@ -240,7 +242,7 @@ func TestVCIContains(t *testing.T) {
 
 var comparisonIteratorTests = []struct {
 	message string
-	qs      graph.Namer
+	qs      refs.Namer
 	val     quad.Value
 }{
 	{
@@ -261,13 +263,9 @@ func TestComparisonIteratorErr(t *testing.T) {
 	errIt := newTestIterator(false, wantErr)
 
 	for _, test := range comparisonIteratorTests {
-		vc := NewComparison(errIt, CompareLT, test.val, test.qs)
+		vc := NewComparison(errIt, CompareLT, test.val, test.qs).Iterate()
 
-		if vc.Next(ctx) != false {
-			t.Errorf("Comparison iterator did not pass through initial 'false': %s", test.message)
-		}
-		if vc.Err() != wantErr {
-			t.Errorf("Comparison iterator did not pass through underlying Err: %s", test.message)
-		}
+		require.False(t, vc.Next(ctx))
+		require.Equal(t, wantErr, vc.Err())
 	}
 }

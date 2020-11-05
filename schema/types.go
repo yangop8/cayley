@@ -1,10 +1,10 @@
 package schema
 
 import (
-	"github.com/cayleygraph/cayley/quad"
-	_ "github.com/cayleygraph/cayley/voc/rdf"
-	_ "github.com/cayleygraph/cayley/voc/rdfs"
-	"github.com/cayleygraph/cayley/voc/schema"
+	"github.com/cayleygraph/quad"
+	_ "github.com/cayleygraph/quad/voc/rdf"
+	_ "github.com/cayleygraph/quad/voc/rdfs"
+	"github.com/cayleygraph/quad/voc/schema"
 )
 
 func init() {
@@ -12,7 +12,8 @@ func init() {
 	RegisterType(quad.IRI(schema.Property), Property{})
 }
 
-type Object struct {
+// Resource is a basic RDF resource object.
+type Resource struct {
 	ID quad.IRI `quad:"@id"`
 
 	Label   string `quad:"rdfs:label,optional"`
@@ -23,14 +24,14 @@ type Object struct {
 }
 
 type Property struct {
-	Object
+	Resource
 	InverseOf    quad.IRI   `quad:"schema:inverseOf,optional"`
 	SupersededBy []quad.IRI `quad:"schema:supersededBy,optional"`
 	Expects      []quad.IRI `quad:"schema:rangeIncludes"`
 }
 
 type Class struct {
-	Object
+	Resource
 	Properties   []Property `quad:"schema:domainIncludes < *,optional"`
 	SupersededBy []quad.IRI `quad:"schema:supersededBy,optional"`
 	Extends      []quad.IRI `quad:"rdfs:subClassOf,optional"`

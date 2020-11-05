@@ -8,7 +8,9 @@ cayley.json
 .cayley_history
 .DS_Store
 
-# The built binary
-cayley/
 dist/
 vendor/
+ui/
+packrd/packed-*
+# The build binary
+/cayley

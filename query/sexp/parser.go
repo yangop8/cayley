@@ -15,26 +15,28 @@
 package sexp
 
 import (
+	"context"
+
 	"github.com/badgerodon/peg"
 
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/iterator"
-	"github.com/cayleygraph/cayley/graph/shape"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/cayley/query/shape"
+	"github.com/cayleygraph/quad"
 )
 
-func BuildIteratorTreeForQuery(qs graph.QuadStore, query string) graph.Iterator {
-	s, err := BuildShape(query)
+func BuildIteratorTreeForQuery(ctx context.Context, qs graph.QuadStore, query string) iterator.Shape {
+	s, err := BuildShape(ctx, query)
 	if err != nil {
 		return iterator.NewError(err)
 	}
-	return shape.BuildIterator(qs, s)
+	return shape.BuildIterator(ctx, qs, s)
 }
 
-func BuildShape(query string) (shape.Shape, error) {
+func BuildShape(ctx context.Context, query string) (shape.Shape, error) {
 	tree := parseQuery(query)
 	s, _ := buildShape(tree)
-	s, _ = shape.Optimize(s, nil)
+	s, _ = shape.Optimize(ctx, s, nil)
 	return s, nil
 }
 

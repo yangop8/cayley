@@ -20,13 +20,15 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/graphtest"
 	"github.com/cayleygraph/cayley/graph/iterator"
-	"github.com/cayleygraph/cayley/graph/shape"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/cayley/graph/refs"
+	"github.com/cayleygraph/cayley/query/shape"
 	"github.com/cayleygraph/cayley/writer"
-	"github.com/stretchr/testify/require"
+	"github.com/cayleygraph/quad"
 )
 
 // This is a simple test graph.
@@ -104,8 +106,8 @@ type pair struct {
 func TestMemstoreValueOf(t *testing.T) {
 	qs, _, index := makeTestStore(simpleGraph)
 	exp := graph.Stats{
-		Nodes: graph.Size{Size: 11, Exact: true},
-		Quads: graph.Size{Size: 11, Exact: true},
+		Nodes: refs.Size{Value: 11, Exact: true},
+		Quads: refs.Size{Value: 11, Exact: true},
 	}
 	st, err := qs.Stats(context.Background(), true)
 	require.NoError(t, err)
@@ -136,12 +138,12 @@ func TestIteratorsAndNextResultOrderA(t *testing.T) {
 
 	const allTag = "all"
 	innerAnd := iterator.NewAnd(
-		iterator.NewLinksTo(qs, fixed2, quad.Predicate),
-		iterator.NewLinksTo(qs, iterator.Tag(all, allTag), quad.Object),
+		graph.NewLinksTo(qs, fixed2, quad.Predicate),
+		graph.NewLinksTo(qs, iterator.Tag(all, allTag), quad.Object),
 	)
 
-	hasa := iterator.NewHasA(qs, innerAnd, quad.Subject)
-	outerAnd := iterator.NewAnd(fixed, hasa)
+	hasa := graph.NewHasA(qs, innerAnd, quad.Subject)
+	outerAnd := iterator.NewAnd(fixed, hasa).Iterate()
 
 	if !outerAnd.Next(ctx) {
 		t.Error("Expected one matching subtree")
@@ -177,11 +179,11 @@ func TestIteratorsAndNextResultOrderA(t *testing.T) {
 func TestLinksToOptimization(t *testing.T) {
 	qs, _, _ := makeTestStore(simpleGraph)
 
-	lto := shape.BuildIterator(qs, shape.Quads{
+	lto := shape.BuildIterator(context.TODO(), qs, shape.Quads{
 		{Dir: quad.Object, Values: shape.Lookup{quad.Raw("cool")}},
 	})
 
-	newIt, changed := lto.Optimize()
+	newIt, changed := lto.Optimize(context.TODO())
 	if changed {
 		t.Errorf("unexpected optimization step")
 	}
@@ -212,14 +214,14 @@ func TestRemoveQuad(t *testing.T) {
 	fixed2.Add(qs.ValueOf(quad.Raw("follows")))
 
 	innerAnd := iterator.NewAnd(
-		iterator.NewLinksTo(qs, fixed, quad.Subject),
-		iterator.NewLinksTo(qs, fixed2, quad.Predicate),
+		graph.NewLinksTo(qs, fixed, quad.Subject),
+		graph.NewLinksTo(qs, fixed2, quad.Predicate),
 	)
 
-	hasa := iterator.NewHasA(qs, innerAnd, quad.Object)
+	hasa := graph.NewHasA(qs, innerAnd, quad.Object)
 
-	newIt, _ := hasa.Optimize()
-	if newIt.Next(ctx) {
+	newIt, _ := hasa.Optimize(ctx)
+	if newIt.Iterate().Next(ctx) {
 		t.Error("E should not have any followers.")
 	}
 }

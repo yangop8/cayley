@@ -49,14 +49,6 @@ func WriteResult(w io.Writer, result interface{}) error {
 	return enc.Encode(SuccessQueryWrapper{result})
 }
 
-func GetQueryShape(q string, ses query.HTTP) ([]byte, error) {
-	s, err := ses.ShapeOf(q)
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(s)
-}
-
 func (api *API) contextForRequest(r *http.Request) (context.Context, func()) {
 	ctx := context.TODO() // TODO(dennwc): get from request
 	cancel := func() {}
@@ -75,6 +67,8 @@ func defaultErrorFunc(w query.ResponseWriter, err error) {
 }
 
 // TODO(barakmich): Turn this into proper middleware.
+
+// ServeV1Query is the HTTP handler for queries in API V1
 func (api *API) ServeV1Query(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	ctx, cancel := api.contextForRequest(r)
 	defer cancel()
@@ -103,8 +97,8 @@ func (api *API) ServeV1Query(w http.ResponseWriter, r *http.Request, params http
 		l.HTTPQuery(ctx, h.QuadStore, w, r.Body)
 		return
 	}
-	if l.HTTP == nil {
-		errFunc(w, errors.New("HTTP interface is not supported for this query language."))
+	if l.Session == nil {
+		errFunc(w, errors.New("no support for HTTP interface for this query language"))
 		return
 	}
 
@@ -114,73 +108,33 @@ func (api *API) ServeV1Query(w http.ResponseWriter, r *http.Request, params http
 		limit = 100
 	}
 
-	ses := l.HTTP(h.QuadStore)
+	ses := l.Session(h.QuadStore)
 	bodyBytes, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		errFunc(w, err)
 		return
 	}
-	code := string(bodyBytes)
-
-	c := make(chan query.Result, 5)
-	go ses.Execute(ctx, code, c, limit)
-
-	for res := range c {
-		if err := res.Err(); err != nil {
-			if err == nil {
-				continue // wait for results channel to close
-			}
-			errFunc(w, err)
-			return
-		}
-		ses.Collate(res)
-	}
-	output, err := ses.Results()
+	it, err := ses.Execute(ctx, string(bodyBytes), query.Options{
+		Collation: query.JSON,
+		Limit:     limit,
+	})
 	if err != nil {
 		errFunc(w, err)
 		return
 	}
-	_ = WriteResult(w, output)
+	defer it.Close()
+
+	var out []interface{}
+	for it.Next(ctx) {
+		out = append(out, it.Result())
+	}
+	if err = it.Err(); err != nil {
+		errFunc(w, err)
+		return
+	}
+	_ = WriteResult(w, out)
 }
 
 func (api *API) ServeV1Shape(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
-	ctx, cancel := api.contextForRequest(r)
-	defer cancel()
-	select {
-	case <-ctx.Done():
-		jsonResponse(w, http.StatusBadRequest, "Cancelled")
-		return
-	default:
-	}
-	h, err := api.GetHandleForRequest(r)
-	if err != nil {
-		jsonResponse(w, http.StatusBadRequest, err)
-		return
-	}
-	l := query.GetLanguage(params.ByName("query_lang"))
-	if l == nil {
-		jsonResponse(w, http.StatusBadRequest, "Unknown query language.")
-		return
-	} else if l.HTTP == nil {
-		jsonResponse(w, http.StatusBadRequest, "HTTP interface is not supported for this query language.")
-		return
-	}
-	ses := l.HTTP(h.QuadStore)
-	bodyBytes, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		jsonResponse(w, http.StatusBadRequest, err)
-		return
-	}
-	code := string(bodyBytes)
-
-	output, err := GetQueryShape(code, ses)
-	if err == query.ErrParseMore {
-		jsonResponse(w, http.StatusBadRequest, "Incomplete data?")
-		return
-	} else if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		WriteError(w, err)
-		return
-	}
-	w.Write(output)
+	jsonResponse(w, http.StatusNotImplemented, "Query shape API v1 is deprecated.")
 }

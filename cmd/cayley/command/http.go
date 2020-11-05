@@ -12,7 +12,7 @@ import (
 	chttp "github.com/cayleygraph/cayley/internal/http"
 )
 
-func NewHttpCmd() *cobra.Command {
+func NewHTTPCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "http",
 		Short: "Serve an HTTP endpoint on the given host and port.",
@@ -46,7 +46,6 @@ func NewHttpCmd() *cobra.Command {
 	cmd.Flags().String("host", "127.0.0.1:64210", "host:port to listen on")
 	cmd.Flags().Bool("init", false, "initialize the database before using it")
 	cmd.Flags().DurationP("timeout", "t", 30*time.Second, "elapsed time until an individual query times out")
-	cmd.Flags().StringVar(&chttp.AssetsPath, "assets", "", "explicit path to the HTTP assets")
 	registerLoadFlags(cmd)
 	viper.BindPFlag(keyQueryTimeout, cmd.Flags().Lookup("timeout"))
 	return cmd
